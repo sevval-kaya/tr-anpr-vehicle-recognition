@@ -97,6 +97,45 @@ parametrik).
 
 **Onay gerekli mi:** Evet — plan özetinde soruldu.
 
+## 12. Roboflow indirmesinde Windows'a özgü üç ayrı hata bulundu ve düzeltildi
+
+Roboflow Türk plaka veri setini (v8, 3.458 görüntü) indirirken art arda üç
+farklı hatayla karşılaşıldı; hepsi Windows + OneDrive-senkronize derin
+klasör yapısının bir sonucu, kodun mantığında değil:
+
+1. **`overwrite=False` sessiz no-op:** `download_turkish_plates_roboflow`,
+   roboflow'u çağırmadan önce `destination.mkdir(...)` çağırıyordu.
+   roboflow'un `Version.download()` metodu, hedef klasör zaten varsa
+   (`overwrite=True` verilmedikçe) hiçbir şey indirmeden sessizce
+   `Dataset` nesnesi döndürüyor (`roboflow/core/version.py:301`). Sonuç:
+   komut "başarılı" görünüyordu ama klasör boş kalıyordu. **Düzeltme:**
+   `mkdir` çağrısı kaldırıldı, `overwrite=True` geçildi.
+2. **roboflow'un kendi zip extraction'ı MAX_PATH'e takılıyor:** Roboflow
+   görüntü dosya adları kaynak Instagram/sosyal medya başlıklarından
+   türetildiği için 100+ karakter olabiliyor; OneDrive içindeki derin proje
+   yoluyla birleşince Windows'un ~260 karakter MAX_PATH sınırını aşıyor,
+   `zipfile.extract()` içeride `FileNotFoundError` fırlatıyor. **Düzeltme:**
+   `_extract_zip_windows_long_path_safe` eklendi — hedef yolu `\\?\` öneki
+   ile genişletilmiş-uzunluk Win32 API'sine yönlendiriyor (sistem geneli
+   "uzun yol" ayarı/admin yetkisi gerektirmez). roboflow'un indirdiği zip
+   dosyası duruyor, sadece extraction bizim tarafımızdan tekrarlanıyor.
+3. **Aynı MAX_PATH sorunu `materialize_split`'te de çıktı:** Bu kez
+   `plaka.data.yolo_dataset.materialize_split`'in kendi `shutil.copy2`
+   çağrısında. **Düzeltme:** Aynı `\\?\` önek tekniği `_long_path()` olarak
+   genelleştirildi, hem kaynak hem hedef yola uygulanıyor.
+
+**Gerekçe (neden hemen fark edilmedi):** Her üç hata da "sessiz başarı"
+şeklinde tezahür etti — komut sıfır çıkış koduyla bitiyor ama klasör boş
+kalıyordu (1. hata) ya da kısmi/traceback'li ama "arka planda çalıştı,
+tamamlandı" bildirimiyle karışıyordu (2. ve 3. hata arka plan görev takibi
+üzerinden ilk denemelerde gözden kaçtı). Doğrulama adımı olarak her indirme
+sonrası dosya sayısını diskte fiilen saymak (`find ... | wc -l`) zorunlu
+hale getirildi — sadece exit code'a güvenmek yeterli değil.
+
+**Etki:** `data/external/roboflow_plates/` (3.458 görüntü) ve
+`data/processed/plates/` (2766/345/347 train/val/test) artık doğru ve
+tam durumda.
+
 ## 8. Veri seti lisans notu
 
 **Karar:** `scripts/download_datasets.py`, CompCars'ı otomatikleştirmiyor.

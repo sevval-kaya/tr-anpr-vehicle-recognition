@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -133,7 +134,6 @@ def download_turkish_plates_roboflow(destination: Path, version: int) -> None:
         logger.error("roboflow is required; install with `pip install -e '.[data]'`")
         raise
 
-    destination.mkdir(parents=True, exist_ok=True)
     logger.info(
         "Downloading Roboflow %s/%s v%d into %s",
         ROBOFLOW_WORKSPACE,
@@ -143,7 +143,50 @@ def download_turkish_plates_roboflow(destination: Path, version: int) -> None:
     )
     rf = Roboflow(api_key=api_key)
     project = rf.workspace(ROBOFLOW_WORKSPACE).project(ROBOFLOW_PROJECT)
-    project.version(version).download("yolov11", location=str(destination))
+    try:
+        # overwrite=True: roboflow's download() silently no-ops if `location`
+        # already exists (e.g. left over from a prior partial/failed
+        # attempt), returning a Dataset handle without downloading anything.
+        project.version(version).download("yolov11", location=str(destination), overwrite=True)
+    except FileNotFoundError:
+        # Some export filenames (social-media-caption-style names from the
+        # source images) combined with a deeply nested destination (e.g.
+        # inside a synced OneDrive folder) exceed Windows' ~260 char
+        # MAX_PATH during roboflow's own zip extraction. The zip itself
+        # downloaded fine — only extraction failed — so recover by
+        # re-extracting it ourselves with long-path-safe paths instead of
+        # re-downloading.
+        zip_path = destination / "roboflow.zip"
+        if not zip_path.exists():
+            raise
+        logger.warning(
+            "Extraction hit Windows' MAX_PATH limit; retrying with long-path-safe extraction"
+        )
+        _extract_zip_windows_long_path_safe(zip_path, destination)
+        zip_path.unlink()
+
+
+def _extract_zip_windows_long_path_safe(zip_path: Path, destination: Path) -> None:
+    """Extract a zip without hitting Windows' ~260 char MAX_PATH limit.
+
+    Prefixing an absolute path with \\\\?\\ opts into the Win32
+    extended-length path API, which has no such limit — unlike the
+    system-wide "enable long paths" registry setting, this needs no
+    elevated privileges and works per-call.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    root = f"\\\\?\\{destination.resolve()}" if os.name == "nt" else str(destination)
+
+    with zipfile.ZipFile(zip_path) as archive:
+        for member in archive.infolist():
+            member_path = member.filename.replace("/", os.sep)
+            target_path = os.path.join(root, member_path)
+            if member.is_dir():
+                os.makedirs(target_path, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with archive.open(member) as source, open(target_path, "wb") as target:
+                shutil.copyfileobj(source, target)
 
 
 def download_stanford_cars(destination: Path) -> None:

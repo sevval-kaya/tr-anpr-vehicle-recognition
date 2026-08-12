@@ -19,12 +19,25 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
     beklenen), 150 Hyundai — 4.2 bölümündeki dengesizlik riski gerçek.
   - [ ] Stanford Cars: torchvision indiricisi kırık (bkz. `docs/decisions.md`
     #11); Kaggle/HuggingFace mirror'ı gerekiyorsa daha sonra eklenir.
-  - [ ] Türk plaka veri seti (Kaggle) — kimlik bilgisi kurulumu kullanıcıya
-    bırakıldı, henüz indirilmedi.
-  - [ ] Plaka dedektörü ilk eğitimi (VMMRdb'de plaka bbox etiketi yok;
-    Türk/çok-ülkeli plaka veri setleri gerekiyor).
-  - [ ] Marka/model sınıflandırıcı ilk eğitimi (VMMRdb ile başlanabilir).
-  - [ ] Baseline pipeline'ın gerçek görüntülerle uçtan uca smoke test'i.
+  - [x] Roboflow Türk plaka veri seti indirildi: `data/external/roboflow_plates/`
+    (v8, 3.458 görüntü, tek sınıf `license_plate`, YOLO bbox formatı, CC BY
+    4.0). İndirme sırasında üç ayrı Windows/OneDrive kaynaklı hata bulunup
+    düzeltildi (bkz. `docs/decisions.md` #12).
+  - [x] `scripts/prepare_plate_data.py` ile `data/processed/plates/`e
+    normalize edildi: 2766/345/347 train/val/test, `data.yaml` yazıldı.
+    Plaka dedektörü eğitimine hazır.
+  - [ ] Türk plaka veri seti (Kaggle) — CC0 lisanslı, YOLO formatında bbox
+    etiketli olduğu sayfa metadata'sından doğrulandı (indirmeden), ama
+    henüz indirilmedi; Kaggle kimlik bilgisi kurulumu kullanıcıya bırakıldı.
+  - [ ] Plaka dedektörü ilk eğitimi (veri hazır, eğitim script'i
+    (`scripts/train_detector.py` benzeri) henüz yazılmadı).
+  - [x] Marka/model sınıflandırıcı: `scripts/train_classifier.py` yazıldı,
+    smoke-test ile uçtan uca doğrulandı (5 sınıf, 73 train/8 val görüntü,
+    checkpoint kaydedildi ve `VehicleClassifier.predict()` ile doğru tahmin
+    verdiği teyit edildi). Tam VMMRdb (9.170 sınıf) için GPU gerekiyor —
+    bu ortamda torch CPU-only, gerçek ölçekli eğitim henüz başlatılmadı.
+  - [ ] Baseline pipeline'ın gerçek görüntülerle uçtan uca smoke test'i
+    (plaka dedektörü eğitilince mümkün olacak).
 - [ ] **3. Veri Toplama ve Etiketleme** — Gerçek Türk trafik/plaka
   görüntülerinin toplanması ve etiketlenmesi.
 - [ ] **4. İnce Ayar (Fine-tuning)** — Toplanan veriyle yeniden eğitim,

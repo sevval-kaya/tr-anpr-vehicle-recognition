@@ -12,6 +12,7 @@ can be merged and re-split consistently regardless of how each one arrived.
 
 from __future__ import annotations
 
+import os
 import random
 import shutil
 from dataclasses import dataclass
@@ -20,6 +21,19 @@ from pathlib import Path
 import yaml
 
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".bmp"})
+
+
+def _long_path(path: Path) -> str:
+    """Prefix an absolute path with \\\\?\\ on Windows to opt into the Win32
+    extended-length path API (no ~260 char MAX_PATH limit). Source datasets
+    (e.g. Roboflow exports) can contain filenames derived from long
+    social-media captions/hashtags that, combined with a deeply nested
+    project directory, exceed the legacy limit during a plain copy.
+    """
+    resolved = str(path.resolve())
+    if os.name == "nt" and not resolved.startswith("\\\\?\\"):
+        return f"\\\\?\\{resolved}"
+    return resolved
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,12 +122,15 @@ def materialize_split(
         labels_out.mkdir(parents=True, exist_ok=True)
 
         for example in split_examples:
-            shutil.copy2(example.image_path, images_out / example.image_path.name)
+            shutil.copy2(
+                _long_path(example.image_path),
+                _long_path(images_out / example.image_path.name),
+            )
             label_dest = labels_out / f"{example.image_path.stem}.txt"
             if example.label_path.exists():
-                shutil.copy2(example.label_path, label_dest)
+                shutil.copy2(_long_path(example.label_path), _long_path(label_dest))
             else:
-                label_dest.touch()
+                open(_long_path(label_dest), "wb").close()
 
     data_yaml_path = output_dir / "data.yaml"
     _write_data_yaml(data_yaml_path, output_dir, class_names)
