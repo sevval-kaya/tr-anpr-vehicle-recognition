@@ -3,15 +3,44 @@
 vehicle_classifier:
   weights_path: "models/vehicle_classifier/best.pt"  # not present until trained
   class_names_path: "models/vehicle_classifier/classes.txt"
-  architecture: "convnext_tiny"  # see docs/decisions.md for the size rationale
-  device: "cpu"  # override to "cuda" once a training/inference GPU is confirmed
+  architecture: "efficientnet_b0"  # lightweight; see docs/decisions.md #13
+  device: "cuda"  # RTX 4060 Laptop GPU confirmed available, see docs/decisions.md #14
   top_k: 5
 
 training:
   pretrained_backbone: true  # ImageNet-initialized, per docs section 3.3
+  freeze_backbone: true      # only the classifier head is trained; see docs/decisions.md #13
   epochs_pretrain: 30     # stage 2: VMMRdb + Stanford Cars + CompCars
-  epochs_finetune: 20     # stage 4: Türkiye-yaygın-marka ince ayar
+  epochs_finetune: 20     # stage 4: Turkiye-yaygın-marka ince ayar
   batch_size: 64
-  image_size: 224
+  image_size: 160  # reduced from 224; still light even on GPU, keeps room to raise later
   learning_rate: 3.0e-4
   finetune_learning_rate: 5.0e-5  # lower LR for the fine-tuning pass
+
+# Turkiye'de yaygın markalara odaklanan alt küme (CPU-feasible baseline).
+# Sıra = pazar önceliği; VMMRdb'de dengesiz temsil edildikleri için
+# round-robin seçim kullanılıyor (bkz. plaka.data.select_target_classes,
+# docs/decisions.md #13). dacia/skoda/seat VMMRdb'de hiç yok (0 sınıf).
+target_makes_subset:
+  max_classes: 200
+  target_makes:
+    - "renault"
+    - "fiat"
+    - "ford"
+    - "volkswagen"
+    - "opel"
+    - "hyundai"
+    - "toyota"
+    - "peugeot"
+    - "citroen"
+    - "kia"
+    - "nissan"
+    - "mercedes benz"
+    - "bmw"
+    - "audi"
+    - "honda"
+    - "suzuki"
+    - "mazda"
+    - "mitsubishi"
+    - "volvo"
+    - "mini"

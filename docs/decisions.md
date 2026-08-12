@@ -183,3 +183,52 @@ fırlatıyor (torchvision'ın kendi bilinen sorunu). Kaggle mirror'ı
 (`jessicali9530/stanford-cars-dataset`) veya HuggingFace mirror'ları
 alternatif olarak kullanılabilir, ama kullanıcı şu an için Kaggle kimlik
 bilgisi kurmayı ertelemeyi tercih etti.
+
+## 13. Türkiye-odaklı sınıf alt kümesi: round-robin seçim, VMMRdb dengesizliğine karşı
+
+**Karar:** Tam VMMRdb (9.170 sınıf) yerine, `plaka.data.select_target_classes`
+ile Türkiye'de yaygın 20 markadan (bkz. `configs/classification.yaml`
+`target_makes_subset`) en fazla 200 sınıf seçiliyor. Seçim, her markadan
+sırayla bir sınıf alan round-robin algoritmasıyla yapılıyor (marka içinde
+görüntü sayısına göre azalan sırayla); basit "en çok görüntüsü olan N
+sınıfı al" yaklaşımı kullanılmadı.
+
+**Gerekçe:** VMMRdb marka dağılımı son derece dengesiz — empirik olarak
+ölçüldü: Ford 870 sınıf, Toyota 584, BMW 442, Mercedes-Benz 474 (not: veri
+setinde "mercedes benz" boşlukla ayrılmış, alt çizgi değil — ayrı bir
+parsing kuralı gerekti) varken **Renault sadece 1 sınıf, Opel 4, Citroën 2,
+Peugeot 2**; Dacia/Skoda/SEAT ise **hiç yok** (VMMRdb ABD pazarına göre
+toplanmış). Basit bir "top-N by image count" seçimi bu nedenle neredeyse
+tamamen Ford/Toyota/BMW/Mercedes'ten oluşurdu ve Renault gibi Türkiye'de
+kritik markaları büyük ihtimalle tamamen dışarıda bırakırdı. Round-robin,
+her markanın (veri kısıtı ölçüsünde) temsil edilmesini garanti ediyor.
+
+**Bilinen sınırlama:** Renault yalnızca 1 sınıfla (`renault_captur_2015`)
+temsil ediliyor — sınıflandırıcı gerçekte diğer Renault modellerini hiç
+görmeden eğitiliyor. Bu, VMMRdb'nin temel bir kapsam boşluğu; 4. aşamadaki
+(ince ayar) gerçek Türkiye verisi toplanmadan düzelmeyecek (bkz. proje
+dokümanı 4.2, "Türkiye'de yaygın marka/modeller için ek görüntü toplanmalı").
+
+## 14. GPU keşfedildi, eğitim CPU'dan CUDA'ya taşındı
+
+**Karar:** Kullanıcının "GPU varsa kullan" talimatı üzerine `nvidia-smi` ile
+donanım kontrol edildi: **NVIDIA GeForce RTX 4060 Laptop GPU, 8.6GB VRAM**,
+boşta durumda bulundu. CPU-only kurulu `torch`/`torchvision` kaldırılıp
+sürücünün desteklediği CUDA 13.3'e uygun `torch==2.13.0+cu130` /
+`torchvision==0.28.0+cu130` kuruldu (`--index-url
+https://download.pytorch.org/whl/cu130`). `configs/classification.yaml`
+`device: cuda` olarak güncellendi.
+
+**Gerekçe:** Aynı 20 sınıf/444 görüntülük ölçüm testinde GPU, CPU'ya göre
+~2.5x daha hızlı çıktı (küçük veri setinde sabit maliyetler — kernel
+başlatma, Python döngü ek yükü — baskın olduğundan bu oran alt sınır;
+36.833 görüntülük tam koşuda fark daha belirgin olması bekleniyor). Bu
+sayede `--max-images-per-class` sınırlaması kaldırılıp 200 sınıfın **tüm**
+görüntüleriyle (~36.833 görüntü, CPU planındaki 50/sınıf sınırından çok
+daha fazla) 25 epoch'luk tam bir koşu çalıştırıldı.
+
+**Not:** `freeze_backbone: true` korundu — GPU bu kısıtı gereksiz kılmıyor,
+sadece hızlandırıyor; dondurulmuş omurga hâlâ makul bir baseline stratejisi
+(daha az overfitting riski, daha hızlı yakınsama). Tam ince ayar (omurga
+dahil) GPU ile artık mümkün, ama bu oturumun kapsamı dışında bırakıldı —
+gelecekte `--no-freeze-backbone` ile denenebilir.

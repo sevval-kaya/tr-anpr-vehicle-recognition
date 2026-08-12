@@ -31,11 +31,20 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
     henüz indirilmedi; Kaggle kimlik bilgisi kurulumu kullanıcıya bırakıldı.
   - [ ] Plaka dedektörü ilk eğitimi (veri hazır, eğitim script'i
     (`scripts/train_detector.py` benzeri) henüz yazılmadı).
-  - [x] Marka/model sınıflandırıcı: `scripts/train_classifier.py` yazıldı,
-    smoke-test ile uçtan uca doğrulandı (5 sınıf, 73 train/8 val görüntü,
-    checkpoint kaydedildi ve `VehicleClassifier.predict()` ile doğru tahmin
-    verdiği teyit edildi). Tam VMMRdb (9.170 sınıf) için GPU gerekiyor —
-    bu ortamda torch CPU-only, gerçek ölçekli eğitim henüz başlatılmadı.
+  - [x] Marka/model sınıflandırıcı — **gerçek ölçekli baseline eğitildi**:
+    `scripts/train_classifier.py --turkey-subset`, 200 sınıf (Türkiye'de
+    yaygın 20 marka, `plaka.data.select_target_classes` ile markalar
+    arası dengeli round-robin seçim — bkz. `docs/decisions.md` #13),
+    ~36.800 görüntü, `efficientnet_b0` (dondurulmuş omurga, sadece
+    classifier head eğitiliyor, 256.200 parametre), 160x160 girdi boyutu,
+    25 epoch. **Sonuç: val_top1 %28.3, val_top5 %63.2.** Oturum içinde
+    NVIDIA RTX 4060 Laptop GPU (8.6GB) keşfedilip CUDA'ya geçildi (bkz.
+    `docs/decisions.md` #14); `DataLoader`'a paralel worker eklenince
+    epoch süresi ~7-9 dakikadan ~30-37 saniyeye düştü (veri yükleme
+    darboğazı GPU'yu %10-48 kullanımda bırakıyordu). Toplam eğitim süresi
+    ~17 dakika. Checkpoint `models/vehicle_classifier/` altında,
+    `VehicleClassifier.predict()` ile gerçek bir görüntüde doğru tahmin
+    verdiği teyit edildi.
   - [ ] Baseline pipeline'ın gerçek görüntülerle uçtan uca smoke test'i
     (plaka dedektörü eğitilince mümkün olacak).
 - [ ] **3. Veri Toplama ve Etiketleme** — Gerçek Türk trafik/plaka
@@ -52,7 +61,9 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
 
 ## Şu an nerede duruyoruz
 
-Aşama 1 tamamlandı, Aşama 2'nin kod tarafı (pipeline, doğrulayıcı, metrikler)
-hazır ve test edilmiş durumda. Aşama 2'nin veri tarafına (indirme + ilk
-eğitim) geçmeden önce, kullanıcıdan büyük kararlarda onay isteniyor — bkz.
-oturum sonundaki plan özeti.
+Aşama 1 tamamlandı. Aşama 2'de: plaka tespiti için veri hazır (Roboflow,
+2766/345/347 train/val/test) ama dedektör henüz eğitilmedi; marka/model
+sınıflandırıcı için 200 sınıflık Türkiye-odaklı bir baseline GPU'da
+eğitildi (val_top1 %28.3). Sırada: plaka dedektörü eğitim script'i
+(`scripts/train_detector.py` benzeri, `ultralytics` ile) ve iki modelin
+`InferencePipeline` üzerinden gerçek görüntülerle uçtan uca smoke test'i.

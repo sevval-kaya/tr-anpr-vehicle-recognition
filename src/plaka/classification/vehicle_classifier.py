@@ -32,7 +32,7 @@ class VehicleClassifier:
         self,
         weights_path: str | Path,
         class_names_path: str | Path,
-        architecture: str = "convnext_tiny",
+        architecture: str = "efficientnet_b0",
         device: str = "cpu",
     ) -> None:
         self._weights_path = Path(weights_path)
