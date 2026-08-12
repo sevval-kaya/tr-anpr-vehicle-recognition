@@ -115,3 +115,32 @@ iskeletinin kapsamı dışında, hukuki/lisans incelemesi gerektirir.
 sırasıyla birebir eşleşmesi için; böylece eğitimde kullanılan
 sınıf-indeks eşlemesi ile çıkarımda okunan `classes.txt` her zaman tutarlı
 kalır.
+
+## 10. VMMRdb kaynak adresi ve dağıtım şekli düzeltildi
+
+**Karar:** `scripts/download_datasets.py`, VMMRdb'yi `github.com/faezetta/VMMRdb`
+üzerinden barındırılan **~11.5GB'lık tek bir Dropbox zip dosyası** olarak
+indiriyor (git clone değil, doğrudan HTTP indirme + extract).
+
+**Gerekçe:** Proje dokümanının referans listesindeki `github.com/lgov/VMMRdb`
+adresi mevcut değil (404). Doğru repo GitHub arama API'siyle bulundu
+(`faezetta/VMMRdb`); repo'nun kendisi sadece kod/metadata içeriyor, asıl
+291.752 görüntü Dropbox'ta tek zip olarak barındırılıyor. Bu nedenle ilk
+yazdığım `git clone` tabanlı indirici çalışmıyordu — HTTP streaming
+indirmeyle değiştirildi.
+
+**Not:** Dropbox linkleri kişisel hesaplara bağlı barındırma olduğundan
+gelecekte kaldırılma riski taşır; üretim öncesi veri setinin kalıcı bir
+kopyasının kurum içi depolamaya (S3/GCS vb.) alınması önerilir.
+
+## 11. Stanford Cars (torchvision) kırık, kullanılmıyor
+
+**Karar:** `download_stanford_cars` fonksiyonu kodda duruyor ama şu an
+kullanılmıyor; VMMRdb ile devam edildi.
+
+**Gerekçe:** torchvision'ın `StanfordCars.download()` metodu, orijinal
+Stanford host'unun çevrimdışı olması nedeniyle koşulsuz `ValueError`
+fırlatıyor (torchvision'ın kendi bilinen sorunu). Kaggle mirror'ı
+(`jessicali9530/stanford-cars-dataset`) veya HuggingFace mirror'ları
+alternatif olarak kullanılabilir, ama kullanıcı şu an için Kaggle kimlik
+bilgisi kurmayı ertelemeyi tercih etti.

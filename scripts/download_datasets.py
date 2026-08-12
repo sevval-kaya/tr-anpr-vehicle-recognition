@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """Download baseline open-source datasets into data/external/.
 
-Each dataset has a different access mechanism (Kaggle API, git clone,
-manual license request), so this exposes one subcommand per dataset rather
-than a single generic "download everything" that would silently fail on
-whichever one needs manual steps.
+Each dataset has a different access mechanism (direct zip download, Kaggle
+API, manual license request), so this exposes one subcommand per dataset
+rather than a single generic "download everything" that would silently fail
+on whichever one needs manual steps.
 
 Nothing here runs automatically — it's invoked explicitly, e.g.:
 
@@ -22,7 +22,11 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import urllib.request
+import zipfile
 from pathlib import Path
+
+from tqdm import tqdm
 
 from plaka.utils.logging import get_logger
 
@@ -30,21 +34,46 @@ logger = get_logger(__name__)
 
 EXTERNAL_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "external"
 
-VMMRDB_REPO_URL = "https://github.com/lgov/VMMRdb.git"
+# The VMMRdb git repo (github.com/faezetta/VMMRdb — NOT github.com/lgov/VMMRdb,
+# which the source project brief cites but doesn't exist) holds only code and
+# metadata; the ~291,752 images are hosted as a single ~11.5GB Dropbox zip.
+VMMRDB_ZIP_URL = "https://www.dropbox.com/s/uwa7c5uz7cac7cw/VMMRdb.zip?dl=1"
 TURKISH_PLATE_KAGGLE_SLUG = "smaildurcan/turkish-license-plate-dataset"
 
 
-def download_vmmrdb(destination: Path) -> None:
-    """Clone VMMRdb (9,170 classes, ~291,752 images, 1950-2016).
+def _download_with_progress(url: str, output_path: Path) -> None:
+    request = urllib.request.Request(url, headers={"User-Agent": "plaka-dataset-downloader"})
+    with urllib.request.urlopen(request) as response:
+        total_size = int(response.headers.get("Content-Length", 0))
+        with (
+            output_path.open("wb") as out_file,
+            tqdm(total=total_size, unit="B", unit_scale=True, unit_divisor=1024) as progress,
+        ):
+            while chunk := response.read(1024 * 1024):
+                out_file.write(chunk)
+                progress.update(len(chunk))
 
-    This is a large clone (multi-GB with LFS-tracked images); expect it to
-    take a while on a slow connection.
+
+def download_vmmrdb(destination: Path) -> None:
+    """Download and extract VMMRdb (9,170 classes, ~291,752 images, 1950-2016).
+
+    Downloads the ~11.5GB source zip with a progress bar, extracts it, then
+    deletes the zip to avoid keeping two copies of the data on disk.
     """
-    if destination.exists():
-        logger.info("VMMRdb already present at %s, skipping clone", destination)
+    if destination.exists() and any(destination.iterdir()):
+        logger.info("VMMRdb already present at %s, skipping download", destination)
         return
-    logger.info("Cloning VMMRdb into %s", destination)
-    subprocess.run(["git", "clone", VMMRDB_REPO_URL, str(destination)], check=True)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    zip_path = destination.parent / "vmmrdb_download.zip"
+    logger.info("Downloading VMMRdb (~11.5GB) to %s", zip_path)
+    _download_with_progress(VMMRDB_ZIP_URL, zip_path)
+
+    logger.info("Extracting %s into %s", zip_path, destination)
+    with zipfile.ZipFile(zip_path) as archive:
+        archive.extractall(destination)
+    zip_path.unlink()
+    logger.info("VMMRdb ready at %s", destination)
 
 
 def download_turkish_plates(destination: Path) -> None:
@@ -72,7 +101,14 @@ def download_turkish_plates(destination: Path) -> None:
 
 
 def download_stanford_cars(destination: Path) -> None:
-    """Download Stanford Cars (196 classes) via torchvision's built-in dataset."""
+    """Download Stanford Cars (196 classes) via torchvision's built-in dataset.
+
+    Known broken as of this writing: the original Stanford host is offline
+    and torchvision's StanfordCars.download() raises ValueError
+    unconditionally (see docs/decisions.md). Left in place in case
+    torchvision points it at a working mirror in a future release; until
+    then, use VMMRdb or set up a Kaggle mirror instead.
+    """
     try:
         from torchvision.datasets import StanfordCars
     except ImportError:

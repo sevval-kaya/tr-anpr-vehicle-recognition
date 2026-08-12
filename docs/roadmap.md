@@ -10,11 +10,20 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
     (fake) bağımlılıklarla test edildi.
   - [x] Türk plaka format doğrulayıcı tam implementasyon + testler.
   - [x] Değerlendirme metrikleri (CER, tam eşleşme, top-k) implementasyonu.
-  - [ ] Veri setleri indirilip `data/external/`e yerleştirilecek (onay
-    bekleniyor — bkz. plan özeti).
+  - [x] VMMRdb indirildi ve çıkarıldı: `data/external/vmmrdb/` (9.170 sınıf,
+    285.086 görüntü — doküman 291.752 diyor, küçük fark kaynağı henüz
+    araştırılmadı). Sınıf listesi `data/processed/vmmrdb_classes.txt`e
+    yazıldı (`discover_class_names` ile yeniden üretilebilir).
+    Türkiye-ilgili marka kapsamı empirik olarak doğrulandı: 1 Renault sınıfı
+    (`renault_captur_2015`), 15 Fiat, 0 Togg (2016 sonrası olduğu için
+    beklenen), 150 Hyundai — 4.2 bölümündeki dengesizlik riski gerçek.
+  - [ ] Stanford Cars: torchvision indiricisi kırık (bkz. `docs/decisions.md`
+    #11); Kaggle/HuggingFace mirror'ı gerekiyorsa daha sonra eklenir.
+  - [ ] Türk plaka veri seti (Kaggle) — kimlik bilgisi kurulumu kullanıcıya
+    bırakıldı, henüz indirilmedi.
   - [ ] Plaka dedektörü ilk eğitimi (VMMRdb'de plaka bbox etiketi yok;
     Türk/çok-ülkeli plaka veri setleri gerekiyor).
-  - [ ] Marka/model sınıflandırıcı ilk eğitimi (VMMRdb + Stanford Cars).
+  - [ ] Marka/model sınıflandırıcı ilk eğitimi (VMMRdb ile başlanabilir).
   - [ ] Baseline pipeline'ın gerçek görüntülerle uçtan uca smoke test'i.
 - [ ] **3. Veri Toplama ve Etiketleme** — Gerçek Türk trafik/plaka
   görüntülerinin toplanması ve etiketlenmesi.
