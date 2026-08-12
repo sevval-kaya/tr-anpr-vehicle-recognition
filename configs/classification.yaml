@@ -1,0 +1,17 @@
+# Vehicle make/model classification stage config.
+
+vehicle_classifier:
+  weights_path: "models/vehicle_classifier/best.pt"  # not present until trained
+  class_names_path: "models/vehicle_classifier/classes.txt"
+  architecture: "convnext_tiny"  # see docs/decisions.md for the size rationale
+  device: "cpu"  # override to "cuda" once a training/inference GPU is confirmed
+  top_k: 5
+
+training:
+  pretrained_backbone: true  # ImageNet-initialized, per docs section 3.3
+  epochs_pretrain: 30     # stage 2: VMMRdb + Stanford Cars + CompCars
+  epochs_finetune: 20     # stage 4: Türkiye-yaygın-marka ince ayar
+  batch_size: 64
+  image_size: 224
+  learning_rate: 3.0e-4
+  finetune_learning_rate: 5.0e-5  # lower LR for the fine-tuning pass

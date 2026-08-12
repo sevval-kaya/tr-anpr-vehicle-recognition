@@ -1,0 +1,14 @@
+# Top-level pipeline config: composes detection.yaml + ocr.yaml + classification.yaml.
+# Loaded by scripts/run_inference.py.
+
+detection_config: "configs/detection.yaml"
+ocr_config: "configs/ocr.yaml"
+classification_config: "configs/classification.yaml"
+
+matching:
+  # Fraction of a plate box that must fall inside a vehicle box for the two
+  # to be associated (see plaka.pipeline.inference_pipeline.MIN_PLATE_CONTAINMENT_RATIO).
+  min_plate_containment_ratio: 0.5
+
+logging:
+  level: "INFO"

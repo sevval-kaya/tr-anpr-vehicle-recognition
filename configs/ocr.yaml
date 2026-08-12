@@ -1,0 +1,14 @@
+# Plate OCR stage config.
+
+plate_ocr:
+  weights_path: null  # null = PaddleOCR bundled general-purpose weights (smoke-test baseline)
+  charset: "ABCDEFGHIJKLMNOPRSTUVYZ0123456789"  # Turkish-plate-restricted charset
+  language: "en"
+
+preprocessing:
+  clahe_clip_limit: 2.0
+  clahe_tile_grid_size: [8, 8]
+
+validation:
+  min_il_kodu: 1
+  max_il_kodu: 81
