@@ -73,8 +73,13 @@ class VehicleClassifier:
         model.eval()
         model.to(self._device)
 
-        data_config = timm.data.resolve_data_config({}, model=model)
-        self._transform = timm.data.create_transform(**data_config, is_training=False)
+        # timm.data doesn't ship a py.typed marker for these helpers.
+        data_config = timm.data.resolve_data_config(  # type: ignore[attr-defined,no-untyped-call]
+            {}, model=model
+        )
+        self._transform = timm.data.create_transform(  # type: ignore[attr-defined]
+            **data_config, is_training=False
+        )
         self._model = model
 
     def predict(self, vehicle_crop_bgr: NDArray[np.uint8], top_k: int = 5) -> MakeModelPrediction:

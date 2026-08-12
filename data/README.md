@@ -17,3 +17,15 @@ license-encumbered, so they're fetched locally instead.
 
 See `docs/architecture.md` for how each dataset feeds into which model, and
 `docs/decisions.md` for licensing notes per dataset.
+
+## `external/` kaynak envanteri
+
+| Klasör | Kaynak | Amaç | Lisans |
+|---|---|---|---|
+| `vmmrdb/` | faezetta/VMMRdb (Dropbox zip) | Marka/model sınıflandırma (baseline) | Bkz. üst repo; ticari kullanım öncesi doğrulanmalı |
+| `roboflow_plates/` | [toggai/turkish-license-plate](https://universe.roboflow.com/toggai/turkish-license-plate) (Roboflow Universe) | Plaka **tespiti** — YOLO formatında bbox etiketli, tek sınıf (`license_plate`) | **CC BY 4.0** — dahili kullanım serbest; harici paylaşım/yayın durumunda "toggai, Turkish License Plate Dataset, Roboflow Universe" şeklinde atıf gerekir |
+| `kaggle_plates/` | [smaildurcan/turkish-license-plate-dataset](https://www.kaggle.com/datasets/smaildurcan/turkish-license-plate-dataset) (Kaggle) | Plaka **tespiti** — sayfa metadata'sına göre YOLO formatında bbox etiketli (YOLOv5 için hazırlanmış), ~2.9GB. İndirilip doğrulanmadı, henüz `data/external/`e alınmadı. | **CC0: Public Domain** — atıf bile gerekmez |
+
+Roboflow ve Kaggle indirmeleri kimlik doğrulama gerektirir (`ROBOFLOW_API_KEY`
+ortam değişkeni / `~/.kaggle/kaggle.json`) — ikisi de Claude'un kendi
+adına oluşturamayacağı, kullanıcıya ait hesap bilgileridir.

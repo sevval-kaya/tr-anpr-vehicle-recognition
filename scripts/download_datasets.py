@@ -9,7 +9,9 @@ on whichever one needs manual steps.
 Nothing here runs automatically — it's invoked explicitly, e.g.:
 
     python scripts/download_datasets.py vmmrdb
-    python scripts/download_datasets.py turkish-plates
+    python scripts/download_datasets.py turkish-plates             # Kaggle, needs kaggle.json
+    python scripts/download_datasets.py turkish-plates-roboflow \
+        --version 3                                                # needs ROBOFLOW_API_KEY
     python scripts/download_datasets.py stanford-cars
 
 CompCars is not automated: its license requires filling out a request form
@@ -20,6 +22,7 @@ here.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import urllib.request
@@ -39,6 +42,8 @@ EXTERNAL_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "external"
 # metadata; the ~291,752 images are hosted as a single ~11.5GB Dropbox zip.
 VMMRDB_ZIP_URL = "https://www.dropbox.com/s/uwa7c5uz7cac7cw/VMMRdb.zip?dl=1"
 TURKISH_PLATE_KAGGLE_SLUG = "smaildurcan/turkish-license-plate-dataset"
+ROBOFLOW_WORKSPACE = "toggai"
+ROBOFLOW_PROJECT = "turkish-license-plate"
 
 
 def _download_with_progress(url: str, output_path: Path) -> None:
@@ -100,6 +105,47 @@ def download_turkish_plates(destination: Path) -> None:
     )
 
 
+def download_turkish_plates_roboflow(destination: Path, version: int) -> None:
+    """Download the Roboflow "Turkish License Plate" dataset (YOLO-format, CC BY 4.0).
+
+    Single class (license_plate), already bounding-box annotated — this is
+    the primary source for plate *detector* training data (see
+    docs/decisions.md). Requires a Roboflow API key: despite the permissive
+    CC BY 4.0 license, Roboflow Universe has no anonymous bulk-download path
+    — every export, public or not, goes through an API key tied to a
+    (free) account. Get one at https://app.roboflow.com/settings/api and
+    pass it via the ROBOFLOW_API_KEY environment variable.
+
+    `version` must be looked up on the project page (the version selector
+    dropdown) since Roboflow doesn't document a stable "latest" alias.
+    """
+    api_key = os.environ.get("ROBOFLOW_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "ROBOFLOW_API_KEY is not set. Get a free API key at "
+            "https://app.roboflow.com/settings/api, then set it with "
+            "`export ROBOFLOW_API_KEY=...` (or the Windows equivalent) "
+            "before running this."
+        )
+    try:
+        from roboflow import Roboflow
+    except ImportError:
+        logger.error("roboflow is required; install with `pip install -e '.[data]'`")
+        raise
+
+    destination.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "Downloading Roboflow %s/%s v%d into %s",
+        ROBOFLOW_WORKSPACE,
+        ROBOFLOW_PROJECT,
+        version,
+        destination,
+    )
+    rf = Roboflow(api_key=api_key)
+    project = rf.workspace(ROBOFLOW_WORKSPACE).project(ROBOFLOW_PROJECT)
+    project.version(version).download("yolov11", location=str(destination))
+
+
 def download_stanford_cars(destination: Path) -> None:
     """Download Stanford Cars (196 classes) via torchvision's built-in dataset.
 
@@ -126,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "dataset",
-        choices=["vmmrdb", "turkish-plates", "stanford-cars"],
+        choices=["vmmrdb", "turkish-plates", "turkish-plates-roboflow", "stanford-cars"],
         help="Which dataset to download.",
     )
     parser.add_argument(
@@ -135,14 +181,28 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Override the default data/external/<dataset> destination.",
     )
+    parser.add_argument(
+        "--version",
+        type=int,
+        default=None,
+        help="Roboflow dataset version number (turkish-plates-roboflow only; "
+        "check the version dropdown on the project page).",
+    )
     args = parser.parse_args(argv)
 
     default_destinations = {
         "vmmrdb": EXTERNAL_DATA_DIR / "vmmrdb",
-        "turkish-plates": EXTERNAL_DATA_DIR / "turkish_plates",
+        "turkish-plates": EXTERNAL_DATA_DIR / "kaggle_plates",
+        "turkish-plates-roboflow": EXTERNAL_DATA_DIR / "roboflow_plates",
         "stanford-cars": EXTERNAL_DATA_DIR / "stanford_cars",
     }
     destination = args.destination or default_destinations[args.dataset]
+
+    if args.dataset == "turkish-plates-roboflow":
+        if args.version is None:
+            parser.error("--version is required for turkish-plates-roboflow")
+        download_turkish_plates_roboflow(destination, args.version)
+        return 0
 
     downloaders = {
         "vmmrdb": download_vmmrdb,
