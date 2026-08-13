@@ -29,16 +29,22 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
   - [ ] Türk plaka veri seti (Kaggle) — CC0 lisanslı, YOLO formatında bbox
     etiketli olduğu sayfa metadata'sından doğrulandı (indirmeden), ama
     henüz indirilmedi; Kaggle kimlik bilgisi kurulumu kullanıcıya bırakıldı.
-  - [x] Plaka dedektörü — **gerçek ölçekli baseline eğitildi**:
-    `scripts/train_detector.py`, `yolo26n` (Ultralytics'te gerçekten mevcut
-    olduğu doğrulandı, bkz. `docs/decisions.md` #7 çözüldü), GPU'da 100
-    epoch (~1 saat). **Sonuç: mAP50 %82.0, mAP50-95 %50.6, precision %93.2,
-    recall %74.2.** Yol boyunca `data/processed/plates/`teki etiketlerin
-    ~%7'sinin bbox/poligon karışımı yüzünden Ultralytics tarafından sessizce
-    atıldığı fark edildi ve düzeltildi (bkz. `docs/decisions.md` #15) — düzeltme
-    sonrası val'de 0 kayıp. Checkpoint `models/plate_detector/best.pt`,
-    `PlateDetector.detect()` ile gerçek test görüntülerinde (tekli ve
-    çoklu-plaka sahnelerinde) doğru tespitler verdiği teyit edildi.
+  - [x] Plaka dedektörü — **hafif yerel baseline eğitildi**:
+    `scripts/train_detector.py`, `yolo11n`, 416px, 35 epoch (~6.5 dakika),
+    1750 görüntülük dengeli alt küme (Roboflow + kullanıcı verisi),
+    batch=16, workers=3, "Below Normal" işlem önceliği (bkz.
+    `docs/decisions.md` #18). **Sonuç: mAP50 %68.7, mAP50-95 %46.6,
+    precision %91.8, recall %61.9.** Checkpoint `models/plate_detector/best.pt`
+    (5.4MB), `PlateDetector.detect()` ile gerçek test görüntülerinde
+    doğrulandı.
+    Not: `yolo26n` + tam veri (5.413 görüntü) + 100 epoch ile daha önce bir
+    kez mAP50 %82.0 elde edilmişti, ama o checkpoint yeniden eğitim
+    denemeleri sırasında silindi ve `cache='ram'` denemesi makinenin 16GB
+    RAM'ini aşıp `MemoryError`'a yol açtı (bkz. `docs/decisions.md` #17).
+    Kullanıcı, sistem kullanılabilirliğini korumak için daha hafif
+    ayarlarla devam etmeyi tercih etti — daha yüksek doğruluk isteniyorsa
+    tam veri/model/epoch ile (`cache='disk'` ile, artık güvenli) tekrar
+    eğitilebilir.
   - [x] Marka/model sınıflandırıcı — **gerçek ölçekli baseline eğitildi**:
     `scripts/train_classifier.py --turkey-subset`, 200 sınıf (Türkiye'de
     yaygın 20 marka, `plaka.data.select_target_classes` ile markalar
@@ -76,10 +82,12 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
 
 ## Şu an nerede duruyoruz
 
-Aşama 1 tamamlandı. Aşama 2'de: hem plaka dedektörü (mAP50 %82.0) hem
-marka/model sınıflandırıcı (val_top1 %28.3) GPU'da eğitildi ve ayrı ayrı
-gerçek görüntülerle doğrulandı. Sırada: `InferencePipeline` üzerinden
-ikisini birlikte uçtan uca test etmek, ve plaka OCR'ı için — hangi kaynakta
-olursa olsun — metin-etiketli bir veri kaynağı bulmak/toplamak (şu an
-PaddleOCR'ın hazır ağırlıklarıyla çalışıyor, bizim eğittiğimiz bir model
-değil).
+Aşama 1 tamamlandı. Aşama 2'de: hem plaka dedektörü (hafif yerel baseline,
+mAP50 %68.7) hem marka/model sınıflandırıcı (val_top1 %28.3) GPU'da
+eğitildi ve ayrı ayrı gerçek görüntülerle doğrulandı. Sırada:
+`InferencePipeline` üzerinden ikisini birlikte uçtan uca test etmek; daha
+yüksek doğruluk isteniyorsa dedektörü tam veri/model/epoch ile yeniden
+eğitmek (`cache='disk'` artık güvenli, ~1-1.5 saat sürer); ve plaka OCR'ı
+için — hangi kaynakta olursa olsun — metin-etiketli bir veri kaynağı
+bulmak/toplamak (şu an PaddleOCR'ın hazır ağırlıklarıyla çalışıyor, bizim
+eğittiğimiz bir model değil).
