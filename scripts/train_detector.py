@@ -45,6 +45,7 @@ def train(
     batch_override: int | None,
     device_override: str | None,
     workers_override: int | None,
+    cache_override: str | bool | None,
 ) -> Path:
     """Train the plate detector and copy the best checkpoint to `output_dir`.
 
@@ -68,15 +69,23 @@ def train(
     workers = (
         workers_override if workers_override is not None else int(training_config.get("workers", 8))
     )
+    # "ram" pre-decodes/resizes every image once and keeps it in memory,
+    # instead of re-reading and re-decoding from disk every epoch — a real
+    # win when source images are large (some of our plate photos are
+    # 4608x2592) and there's headroom to spare (this dataset comfortably
+    # fits: 5.4K images at 640x640x3 uint8 is a few GB).
+    cache = cache_override if cache_override is not None else training_config.get("cache", False)
 
     logger.info(
-        "Training plate detector: base=%s epochs=%d imgsz=%d batch=%d device=%s workers=%d",
+        "Training plate detector: base=%s epochs=%d imgsz=%d batch=%d "
+        "device=%s workers=%d cache=%s",
         base_weights,
         epochs,
         image_size,
         batch,
         device,
         workers,
+        cache,
     )
 
     model = YOLO(base_weights)
@@ -88,6 +97,7 @@ def train(
         patience=patience,
         device=device,
         workers=workers,
+        cache=cache,
         project=str(runs_dir),
         name=output_dir.name,
         exist_ok=True,
@@ -149,9 +159,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--workers", type=int, default=None, help="Override configs/detection.yaml workers."
     )
+    parser.add_argument(
+        "--cache",
+        type=str,
+        default=None,
+        choices=["ram", "disk", "false"],
+        help="Image caching mode (speeds up epochs after the first, at the cost of memory/disk).",
+    )
     args = parser.parse_args(argv)
 
     config = _load_config(args.config)
+    cache_override: str | bool | None = args.cache
+    if args.cache == "false":
+        cache_override = False
     train(
         data_yaml=args.data_yaml,
         output_dir=args.output_dir,
@@ -162,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         batch_override=args.batch,
         device_override=args.device,
         workers_override=args.workers,
+        cache_override=cache_override,
     )
     return 0
 

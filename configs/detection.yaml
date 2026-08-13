@@ -14,8 +14,9 @@ plate_detector:
 
 training:
   epochs: 100
-  batch_size: 16
+  batch_size: 64  # GPU had ~5GB headroom at batch=16 (yolo26n is small); see docs/decisions.md #16
   image_size: 640
   patience: 20  # early stopping
   device: "0"   # first CUDA GPU; "cpu" to force CPU
   workers: 8    # DataLoader worker processes (see docs/decisions.md #14 — don't repeat the classifier's mistake)
+  cache: "ram"  # pre-decode/resize once, keep in memory — avoids re-reading large source images every epoch
