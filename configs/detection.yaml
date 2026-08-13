@@ -19,4 +19,7 @@ training:
   patience: 20  # early stopping
   device: "0"   # first CUDA GPU; "cpu" to force CPU
   workers: 8    # DataLoader worker processes (see docs/decisions.md #14 — don't repeat the classifier's mistake)
-  cache: "ram"  # pre-decode/resize once, keep in memory — avoids re-reading large source images every epoch
+  cache: "disk"  # NOT "ram": on Windows, spawn-based DataLoader workers each re-pickle the
+                 # full RAM cache into their own process, multiplying memory by `workers` —
+                 # crashed with MemoryError at workers=8. "disk" avoids repeated decode of large
+                 # source images without that blowup; see docs/decisions.md #17.

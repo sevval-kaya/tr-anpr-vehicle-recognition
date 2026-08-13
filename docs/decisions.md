@@ -286,3 +286,29 @@ gereksiz değildi.
 **Kullanıcı veri seti hakkında not:** Kaynağı/lisansı kullanıcı tarafından
 belirtilmedi ("benim eklediğim/indirdiğim"); harici paylaşım/yayın öncesi
 bu netleştirilmeli (bkz. `data/README.md`).
+
+## 17. `cache="ram"` Windows'ta `MemoryError` ile çöktü — `cache="disk"`e geçildi
+
+**Karar:** `configs/detection.yaml`'da `cache: "ram"` yerine `cache: "disk"`
+kullanılıyor.
+
+**Gerekçe:** #16'daki `cache="ram"` denemesi, val seti önbelleklemesi
+bittikten hemen sonra worker süreçleri başlatılırken şu hatayla çöktü:
+
+```
+File "...multiprocessing\spawn.py", line 132, in _main
+    self = reduction.pickle.load(from_parent)
+MemoryError
+```
+
+Sebep Windows'a özgü: `multiprocessing` Windows'ta `fork()` değil `spawn()`
+kullanıyor, yani her worker süreci ana süreçten **kopya değil, sıfırdan bir
+Python yorumlayıcısı** olarak başlıyor ve ana sürecin durumunu (RAM'deki
+tüm görüntü önbelleği dahil) pickle ile yeniden inşa ediyor. `workers=8` ile
+~5.5GB'lık önbellek 8 kez pickle'lanmaya çalışılınca bellek taştı. Linux'ta
+`fork()` belleği copy-on-write paylaştığı için bu sorun oluşmaz — tamamen
+Windows'a özgü bir tuzak. Ultralytics'in kendi uyarısı da zaten
+`cache='disk'`i "deterministic alternative" olarak öneriyordu; `disk`
+modu her worker'ın kendi başına, önbelleği pickle'lamadan diskteki
+yeniden-boyutlandırılmış dosyaları okumasını sağladığı için bu sorunu
+yaşamıyor.
