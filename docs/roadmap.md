@@ -29,8 +29,16 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
   - [ ] Türk plaka veri seti (Kaggle) — CC0 lisanslı, YOLO formatında bbox
     etiketli olduğu sayfa metadata'sından doğrulandı (indirmeden), ama
     henüz indirilmedi; Kaggle kimlik bilgisi kurulumu kullanıcıya bırakıldı.
-  - [ ] Plaka dedektörü ilk eğitimi (veri hazır, eğitim script'i
-    (`scripts/train_detector.py` benzeri) henüz yazılmadı).
+  - [x] Plaka dedektörü — **gerçek ölçekli baseline eğitildi**:
+    `scripts/train_detector.py`, `yolo26n` (Ultralytics'te gerçekten mevcut
+    olduğu doğrulandı, bkz. `docs/decisions.md` #7 çözüldü), GPU'da 100
+    epoch (~1 saat). **Sonuç: mAP50 %82.0, mAP50-95 %50.6, precision %93.2,
+    recall %74.2.** Yol boyunca `data/processed/plates/`teki etiketlerin
+    ~%7'sinin bbox/poligon karışımı yüzünden Ultralytics tarafından sessizce
+    atıldığı fark edildi ve düzeltildi (bkz. `docs/decisions.md` #15) — düzeltme
+    sonrası val'de 0 kayıp. Checkpoint `models/plate_detector/best.pt`,
+    `PlateDetector.detect()` ile gerçek test görüntülerinde (tekli ve
+    çoklu-plaka sahnelerinde) doğru tespitler verdiği teyit edildi.
   - [x] Marka/model sınıflandırıcı — **gerçek ölçekli baseline eğitildi**:
     `scripts/train_classifier.py --turkey-subset`, 200 sınıf (Türkiye'de
     yaygın 20 marka, `plaka.data.select_target_classes` ile markalar
@@ -45,8 +53,15 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
     ~17 dakika. Checkpoint `models/vehicle_classifier/` altında,
     `VehicleClassifier.predict()` ile gerçek bir görüntüde doğru tahmin
     verdiği teyit edildi.
-  - [ ] Baseline pipeline'ın gerçek görüntülerle uçtan uca smoke test'i
-    (plaka dedektörü eğitilince mümkün olacak).
+  - [ ] Baseline pipeline'ın (`InferencePipeline`: araç tespiti → plaka
+    tespiti → OCR → format doğrulama → marka/model sınıflandırma) gerçek
+    görüntülerle uçtan uca smoke test'i — artık her iki model de hazır.
+  - [ ] Plaka **OCR**'ı henüz eğitilmedi ve eğitilemez durumda: ne
+    Roboflow ne Kaggle veri seti plaka metnini (örn. "34 ABC 123")
+    etiketliyor, ikisi de yalnızca bbox tespiti için. Şimdilik
+    `PlateOcr`, PaddleOCR'ın hazır (bizim eğitmediğimiz) ağırlıklarıyla
+    çalışacak; gerçek ince ayar için plaka-metni etiketli veri toplanmalı
+    (3. aşama).
 - [ ] **3. Veri Toplama ve Etiketleme** — Gerçek Türk trafik/plaka
   görüntülerinin toplanması ve etiketlenmesi.
 - [ ] **4. İnce Ayar (Fine-tuning)** — Toplanan veriyle yeniden eğitim,
@@ -61,9 +76,10 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
 
 ## Şu an nerede duruyoruz
 
-Aşama 1 tamamlandı. Aşama 2'de: plaka tespiti için veri hazır (Roboflow,
-2766/345/347 train/val/test) ama dedektör henüz eğitilmedi; marka/model
-sınıflandırıcı için 200 sınıflık Türkiye-odaklı bir baseline GPU'da
-eğitildi (val_top1 %28.3). Sırada: plaka dedektörü eğitim script'i
-(`scripts/train_detector.py` benzeri, `ultralytics` ile) ve iki modelin
-`InferencePipeline` üzerinden gerçek görüntülerle uçtan uca smoke test'i.
+Aşama 1 tamamlandı. Aşama 2'de: hem plaka dedektörü (mAP50 %82.0) hem
+marka/model sınıflandırıcı (val_top1 %28.3) GPU'da eğitildi ve ayrı ayrı
+gerçek görüntülerle doğrulandı. Sırada: `InferencePipeline` üzerinden
+ikisini birlikte uçtan uca test etmek, ve plaka OCR'ı için — hangi kaynakta
+olursa olsun — metin-etiketli bir veri kaynağı bulmak/toplamak (şu an
+PaddleOCR'ın hazır ağırlıklarıyla çalışıyor, bizim eğittiğimiz bir model
+değil).

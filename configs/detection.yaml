@@ -9,7 +9,7 @@ vehicle_detector:
 plate_detector:
   weights_path: "models/plate_detector/best.pt"  # not present until trained
   confidence_threshold: 0.5
-  architecture: "yolo11n"  # nano variant for baseline; revisit after stage 5
+  architecture: "yolo26n"  # confirmed available; see docs/decisions.md #7 (resolved)
   input_size: 640
 
 training:
@@ -17,3 +17,5 @@ training:
   batch_size: 16
   image_size: 640
   patience: 20  # early stopping
+  device: "0"   # first CUDA GPU; "cpu" to force CPU
+  workers: 8    # DataLoader worker processes (see docs/decisions.md #14 — don't repeat the classifier's mistake)

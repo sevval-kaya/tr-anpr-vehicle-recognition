@@ -81,21 +81,30 @@ kurulu olmadan, hafif sahte (fake) nesnelerle test edebilmek; ayrıca her
 aşamanın arka ucunu (örn. PaddleOCR → özel CRNN) orkestrasyon kodunu
 değiştirmeden değiştirebilmek.
 
-## 7. Doküman "YOLO26" öneriyor — koddaki varsayılan YOLO11 olarak bırakıldı
+## 7. Doküman "YOLO26" öneriyor — [ÇÖZÜLDÜ] doğrulandı, gerçekten var
 
-**Karar:** `configs/*.yaml` ve modül docstring'lerinde varsayılan olarak
-`yolo11n` kullanıldı; doküman Ocak 2026'da yayımlandığı belirtilen "YOLO26"yı
-öneriyor.
+**Karar (güncellendi):** `configs/detection.yaml`'da plaka dedektörü artık
+`yolo26n` kullanıyor. İlk kararda (aşağıda korunuyor, tarihsel referans için)
+YOLO11'de kalınmıştı çünkü YOLO26'nın varlığı doğrulanamamıştı.
 
-**Gerekçe:** YOLO26'nın Ultralytics tarafındaki güncel durumunu
-(kararlılık, dokümantasyon, NMS-free iddiaları) bu ortamdan doğrulayamadım.
-YOLO11 kanıtlanmış şekilde olgun ve geniş topluluk desteğine sahip. Baseline'ı
-doğrulanamamış bir varsayıma kilitlemek yerine, `docs.ultralytics.com`
-üzerinden YOLO26'nın gerçek durumu teyit edildikten sonra tek satırlık config
-değişikliğiyle geçiş yapılabilir (`weights_path` alanı zaten bunun için
-parametrik).
+**Güncelleme gerekçesi:** Plaka dedektörü eğitim script'i yazılırken
+kurulu `ultralytics` paketi (8.4.118) incelendi:
+`ultralytics/cfg/models/26/yolo26*.yaml` dosyaları ve `default.yaml`'daki
+`end2end` (YOLO26/YOLOv10 için NMS-free head) alanı YOLO26'nın gerçekten
+mevcut ve pakete gömülü olduğunu doğruluyor — dokümanın iddiası doğruymuş.
+Artık `yolo26n` kullanılıyor.
 
-**Onay gerekli mi:** Evet — plan özetinde soruldu.
+---
+
+*Orijinal karar (12 Ağustos 2026, doğrulanamadığı için):* `configs/*.yaml`
+ve modül docstring'lerinde varsayılan olarak `yolo11n` kullanıldı; doküman
+Ocak 2026'da yayımlandığı belirtilen "YOLO26"yı öneriyor. YOLO26'nın
+Ultralytics tarafındaki güncel durumunu (kararlılık, dokümantasyon,
+NMS-free iddiaları) o ortamdan doğrulayamadım. YOLO11 kanıtlanmış şekilde
+olgun ve geniş topluluk desteğine sahip. Baseline'ı doğrulanamamış bir
+varsayıma kilitlemek yerine, gerçek durum teyit edildikten sonra tek
+satırlık config değişikliğiyle geçiş yapılabilir denmişti — nitekim öyle
+oldu.
 
 ## 12. Roboflow indirmesinde Windows'a özgü üç ayrı hata bulundu ve düzeltildi
 
@@ -232,3 +241,25 @@ sadece hızlandırıyor; dondurulmuş omurga hâlâ makul bir baseline stratejis
 (daha az overfitting riski, daha hızlı yakınsama). Tam ince ayar (omurga
 dahil) GPU ile artık mümkün, ama bu oturumun kapsamı dışında bırakıldı —
 gelecekte `--no-freeze-backbone` ile denenebilir.
+
+## 15. Roboflow etiketlerinde bbox/poligon karışımı — `materialize_split` normalize ediyor
+
+**Karar:** `plaka.data.yolo_dataset.normalize_yolo_label_text`, her etiket
+satırını (5 değer → zaten bbox, geçer; >5 değer → poligon, sınırlayıcı
+dikdörtgene çevrilir) düz `class x_center y_center width height` formatına
+dönüştürüyor. `materialize_split`, artık etiket dosyalarını ham kopyalamak
+yerine bu normalizasyondan geçiriyor.
+
+**Gerekçe:** Plaka dedektörü eğitim script'ini ilk kez çalıştırırken
+Ultralytics'in `train: ... 2766 images, 39 backgrounds, 192 corrupt`
+uyarısı fark edildi — `data/processed/plates/`teki etiket dosyalarının bir
+kısmı (train'de %6.9, val'de %8.1) hem düz bbox hem poligon satırı
+içeriyordu (muhtemelen Roboflow'da bazı örnekler bbox, bazıları poligon
+aracıyla etiketlenmiş). Ultralytics böyle "karışık" dosyaları resmi olarak
+desteklemiyor ve **tüm görüntüyü sessizce atıyor** — hata vermeden ~%7
+veri kaybı anlamına geliyordu. Poligonu sınırlayıcı dikdörtgenine
+çevirmek (görev zaten object detection, segmentation değil) bu görüntüleri
+kayıpsız geri kazandırıyor.
+
+**Etki:** `scripts/prepare_plate_data.py` yeniden çalıştırıldı,
+`data/processed/plates/` yeniden üretildi — artık `0 corrupt` bekleniyor.

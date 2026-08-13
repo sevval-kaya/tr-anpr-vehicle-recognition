@@ -7,6 +7,7 @@ from plaka.data.yolo_dataset import (
     YoloExample,
     find_yolo_examples,
     materialize_split,
+    normalize_yolo_label_text,
     split_examples,
 )
 
@@ -126,3 +127,44 @@ class TestMaterializeSplit:
         label_files = list((output_dir / "train" / "labels").iterdir())
         assert len(label_files) == 2
         assert all(f.read_text() == "" for f in label_files)
+
+    def test_mixed_segment_and_bbox_labels_are_normalized(self, tmp_path: Path) -> None:
+        source = tmp_path / "source"
+        images_dir = source / "images"
+        labels_dir = source / "labels"
+        images_dir.mkdir(parents=True)
+        labels_dir.mkdir(parents=True)
+        (images_dir / "img0.jpg").write_bytes(b"fake-image-bytes")
+        # One plain bbox row + one polygon (segment) row, as Roboflow
+        # exports sometimes mix per-instance.
+        (labels_dir / "img0.txt").write_text(
+            "0 0.5 0.5 0.2 0.2\n0 0.1 0.1 0.3 0.1 0.3 0.3 0.1 0.3\n"
+        )
+
+        examples = find_yolo_examples(source)
+        split = {"train": examples, "val": [], "test": []}
+        output_dir = tmp_path / "processed"
+        materialize_split(split, output_dir, class_names=["license_plate"])
+
+        lines = (output_dir / "train" / "labels" / "img0.txt").read_text().splitlines()
+        assert len(lines) == 2
+        assert all(len(line.split()) == 5 for line in lines)
+
+
+class TestNormalizeYoloLabelText:
+    def test_bbox_row_passes_through(self) -> None:
+        assert normalize_yolo_label_text("0 0.5 0.5 0.2 0.2\n") == "0 0.5 0.5 0.2 0.2\n"
+
+    def test_polygon_row_converts_to_bounding_rectangle(self) -> None:
+        # A unit square polygon (0,0)-(1,0)-(1,1)-(0,1) -> bbox centered
+        # at (0.5, 0.5) with width=height=1.
+        result = normalize_yolo_label_text("0 0 0 1 0 1 1 0 1\n")
+        class_id, x, y, w, h = result.split()
+        assert class_id == "0"
+        assert (float(x), float(y), float(w), float(h)) == (0.5, 0.5, 1.0, 1.0)
+
+    def test_blank_lines_are_skipped(self) -> None:
+        assert normalize_yolo_label_text("0 0.5 0.5 0.2 0.2\n\n") == "0 0.5 0.5 0.2 0.2\n"
+
+    def test_empty_text_yields_empty_string(self) -> None:
+        assert normalize_yolo_label_text("") == ""

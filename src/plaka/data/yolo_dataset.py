@@ -36,6 +36,46 @@ def _long_path(path: Path) -> str:
     return resolved
 
 
+def _yolo_row_to_bbox_line(class_id: str, values: list[float]) -> str:
+    """Normalize one label row's post-class-id values to a plain
+    `x_center y_center width height` bbox row.
+
+    A 4-value row is already a bbox and passes through unchanged. A row
+    with more values is a polygon/segment (pairs of x, y) — some Roboflow
+    exports mix bbox- and polygon-annotated instances within a single
+    label file depending on which tool was used per-instance, which
+    Ultralytics otherwise rejects outright as a "mixed segment and
+    detection" file, silently dropping the whole image (see
+    docs/decisions.md #15). Converting each polygon to its bounding
+    rectangle recovers those images for detection training, at the cost
+    of the (unused, for this task) exact polygon shape.
+    """
+    if len(values) == 4:
+        x_center, y_center, width, height = values
+    else:
+        xs, ys = values[0::2], values[1::2]
+        x_min, x_max, y_min, y_max = min(xs), max(xs), min(ys), max(ys)
+        x_center, y_center, width, height = (
+            (x_min + x_max) / 2,
+            (y_min + y_max) / 2,
+            x_max - x_min,
+            y_max - y_min,
+        )
+    return f"{class_id} {x_center} {y_center} {width} {height}"
+
+
+def normalize_yolo_label_text(text: str) -> str:
+    """Normalize every row of a YOLO label file's contents to plain bbox format."""
+    normalized_lines = []
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        class_id, values = parts[0], [float(v) for v in parts[1:]]
+        normalized_lines.append(_yolo_row_to_bbox_line(class_id, values))
+    return "\n".join(normalized_lines) + ("\n" if normalized_lines else "")
+
+
 @dataclass(frozen=True, slots=True)
 class YoloExample:
     """One image and its YOLO-format label file (may not exist on disk:
@@ -128,7 +168,10 @@ def materialize_split(
             )
             label_dest = labels_out / f"{example.image_path.stem}.txt"
             if example.label_path.exists():
-                shutil.copy2(_long_path(example.label_path), _long_path(label_dest))
+                with open(_long_path(example.label_path), encoding="utf-8") as source_file:
+                    normalized_text = normalize_yolo_label_text(source_file.read())
+                with open(_long_path(label_dest), "w", encoding="utf-8") as dest_file:
+                    dest_file.write(normalized_text)
             else:
                 open(_long_path(label_dest), "wb").close()
 

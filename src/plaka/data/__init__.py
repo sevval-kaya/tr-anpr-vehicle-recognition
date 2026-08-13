@@ -8,6 +8,7 @@ from plaka.data.yolo_dataset import (
     YoloExample,
     find_yolo_examples,
     materialize_split,
+    normalize_yolo_label_text,
     split_examples,
 )
 
@@ -17,6 +18,7 @@ __all__ = [
     "discover_class_names",
     "find_yolo_examples",
     "materialize_split",
+    "normalize_yolo_label_text",
     "select_target_classes",
     "split_examples",
     "write_class_names",

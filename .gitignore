@@ -27,6 +27,8 @@ models/*
 # Experiment tracking
 wandb/
 mlruns/
+# ultralytics training run artifacts (plots, batch previews, csv)
+runs/
 
 # Outputs / logs
 outputs/*
