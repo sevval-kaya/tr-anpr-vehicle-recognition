@@ -9,16 +9,16 @@ vehicle_detector:
 plate_detector:
   weights_path: "models/plate_detector/best.pt"  # not present until trained
   confidence_threshold: 0.5
-  architecture: "yolo26n"  # confirmed available; see docs/decisions.md #7 (resolved)
-  input_size: 640
+  architecture: "yolo11n"  # local-machine-light baseline; see docs/decisions.md #18
+  input_size: 416
 
 training:
-  epochs: 100
-  batch_size: 64  # GPU had ~5GB headroom at batch=16 (yolo26n is small); see docs/decisions.md #16
-  image_size: 640
-  patience: 20  # early stopping
-  device: "0"   # first CUDA GPU; "cpu" to force CPU
-  workers: 8    # DataLoader worker processes (see docs/decisions.md #14 — don't repeat the classifier's mistake)
+  epochs: 35
+  batch_size: 16
+  image_size: 416   # plates are a large-enough object in frame that this doesn't hurt much
+  patience: 10       # early stopping — tight, since the epoch budget itself is small
+  device: "0"        # first CUDA GPU; "cpu" to force CPU
+  workers: 3         # DataLoader worker processes — kept low to leave the machine usable
   cache: "disk"  # NOT "ram": on Windows, spawn-based DataLoader workers each re-pickle the
                  # full RAM cache into their own process, multiplying memory by `workers` —
                  # crashed with MemoryError at workers=8. "disk" avoids repeated decode of large

@@ -19,7 +19,12 @@ from pathlib import Path
 
 import yaml
 
-from plaka.data.yolo_dataset import find_yolo_examples, materialize_split, split_examples
+from plaka.data.yolo_dataset import (
+    find_yolo_examples,
+    materialize_split,
+    sample_balanced_subset,
+    split_examples,
+)
 from plaka.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -56,18 +61,34 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--train-ratio", type=float, default=0.8)
     parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument(
+        "--max-examples",
+        type=int,
+        default=None,
+        help="Cap total examples, split as evenly as possible across sources "
+        "(for a fast/light baseline run).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args(argv)
 
-    examples = []
+    examples_by_source = {}
     for source_dir in args.source_dirs:
         found = find_yolo_examples(source_dir)
         logger.info("Found %d examples in %s", len(found), source_dir)
-        examples.extend(found)
+        examples_by_source[str(source_dir)] = found
 
-    if not examples:
+    if not any(examples_by_source.values()):
         logger.error("No YOLO-format examples found in any source directory")
         return 1
+
+    if args.max_examples is not None:
+        examples = sample_balanced_subset(examples_by_source, args.max_examples, seed=args.seed)
+        total_available = sum(len(v) for v in examples_by_source.values())
+        logger.info(
+            "Sampled %d/%d examples (balanced across sources)", len(examples), total_available
+        )
+    else:
+        examples = [e for exs in examples_by_source.values() for e in exs]
 
     class_names = _read_class_names(args.source_dirs)
     split = split_examples(

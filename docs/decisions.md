@@ -312,3 +312,29 @@ Windows'a özgü bir tuzak. Ultralytics'in kendi uyarısı da zaten
 modu her worker'ın kendi başına, önbelleği pickle'lamadan diskteki
 yeniden-boyutlandırılmış dosyaları okumasını sağladığı için bu sorunu
 yaşamıyor.
+
+## 18. Yerel makineye göre hafifletilmiş baseline (nano model, 416px, alt küme, az epoch)
+
+**Karar:** `configs/detection.yaml`: `yolo26n`→`yolo11n`, `input_size`/`image_size`
+640→416, `epochs` 100→35, `patience` 20→10, `batch_size` 64→16, `workers` 8→3.
+`plaka.data.sample_balanced_subset` eklendi:
+`prepare_plate_data.py ... --max-examples 1750` ile 5.413 görüntüden
+kaynaklar arası dengeli (Roboflow ~875, kullanıcı verisi ~875) 1750'lik bir
+alt küme türetildi (1400/175/175 train/val/test).
+
+**Gerekçe:** Önceki denemeler (batch=64, cache=ram) 16GB RAM'lik makinede
+`MemoryError`'a yol açtı ve sistemi kullanılamaz hale getirdi (kullanıcı
+"bilgisayarım çok yavaşladı" dedi). Kullanıcı, doğruluktan bilinçli olarak
+ödün verip hız + sistem kullanılabilirliğini önceliklendirmeyi tercih etti:
+tam ölçekli (mAP50 %82) sonuç yerine, pipeline'ı uçtan uca çalışır hale
+getirecek daha mütevazı bir baseline yeterli; veri/model/epoch büyütme
+daha uygun bir zamanda (veya daha güçlü donanımda) tekrar ele alınabilir.
+
+**`sample_balanced_subset` tasarımı:** Kaynak boyutuyla orantılı değil,
+kaynaklar arası **eşit** paylaşım yapıyor (`select_target_classes`'daki
+round-robin mantığıyla aynı ilke — bkz. karar #13); bir kaynak payını
+dolduramazsa (örn. çok küçükse) açık kalan kotayı diğer kaynaklara
+devrediyor, kaybetmiyor.
+
+**İşlem önceliği:** Eğitim süreci Windows'ta "Below Normal" önceliğiyle
+başlatıldı — makine eğitim sürerken kullanılabilir kalsın diye.

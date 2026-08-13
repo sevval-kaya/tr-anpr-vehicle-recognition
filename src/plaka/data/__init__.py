@@ -9,6 +9,7 @@ from plaka.data.yolo_dataset import (
     find_yolo_examples,
     materialize_split,
     normalize_yolo_label_text,
+    sample_balanced_subset,
     split_examples,
 )
 
@@ -19,6 +20,7 @@ __all__ = [
     "find_yolo_examples",
     "materialize_split",
     "normalize_yolo_label_text",
+    "sample_balanced_subset",
     "select_target_classes",
     "split_examples",
     "write_class_names",

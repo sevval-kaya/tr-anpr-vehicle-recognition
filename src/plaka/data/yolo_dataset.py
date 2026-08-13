@@ -109,6 +109,45 @@ def find_yolo_examples(source_dir: Path) -> list[YoloExample]:
     return examples
 
 
+def sample_balanced_subset(
+    examples_by_source: dict[str, list[YoloExample]],
+    max_examples: int,
+    seed: int = 42,
+) -> list[YoloExample]:
+    """Sample up to `max_examples` total, split as evenly as possible across
+    sources (not proportional to each source's size) — for a fast baseline
+    run where "balanced" means every source is meaningfully represented,
+    not just whichever source happens to be largest.
+
+    Sources smaller than their even share contribute everything they have;
+    the unused quota rolls over to the remaining sources.
+
+    Raises:
+        ValueError: if examples_by_source is empty.
+    """
+    if not examples_by_source:
+        raise ValueError("cannot sample from an empty set of sources")
+
+    rng = random.Random(seed)
+    shuffled_by_source = {
+        name: rng.sample(exs, len(exs)) for name, exs in examples_by_source.items()
+    }
+
+    total_available = sum(len(exs) for exs in shuffled_by_source.values())
+    if max_examples >= total_available:
+        return [example for exs in shuffled_by_source.values() for example in exs]
+
+    sampled: list[YoloExample] = []
+    remaining_quota = max_examples
+    remaining_sources = list(shuffled_by_source.items())
+    for index, (_name, exs) in enumerate(remaining_sources):
+        share = remaining_quota // (len(remaining_sources) - index)
+        taken = exs[:share]
+        sampled.extend(taken)
+        remaining_quota -= len(taken)
+    return sampled
+
+
 def split_examples(
     examples: list[YoloExample],
     train_ratio: float = 0.8,
@@ -152,9 +191,17 @@ def materialize_split(
     Images with no label file get an empty `.txt` written (explicit
     "no objects" rather than a silently missing file).
 
+    Wipes `output_dir` first so a re-run with a different source/subset
+    never leaves stale files mixed in with the new ones (this is not just
+    tidiness: Ultralytics' disk-cache mode writes `.npy` files alongside
+    the images, which a partial re-run could otherwise leave orphaned and
+    silently double-counted).
+
     Returns:
         Path to the written data.yaml (an Ultralytics-compatible training config).
     """
+    shutil.rmtree(output_dir, ignore_errors=True)
+
     for split_name, split_examples in split.items():
         images_out = output_dir / split_name / "images"
         labels_out = output_dir / split_name / "labels"

@@ -8,6 +8,7 @@ from plaka.data.yolo_dataset import (
     find_yolo_examples,
     materialize_split,
     normalize_yolo_label_text,
+    sample_balanced_subset,
     split_examples,
 )
 
@@ -116,6 +117,23 @@ class TestMaterializeSplit:
         assert config["names"] == ["license_plate"]
         assert config["train"] == "train/images"
 
+    def test_wipes_stale_files_from_a_previous_run(self, tmp_path: Path) -> None:
+        source = _make_flat_source(tmp_path / "source", n=2)
+        examples = find_yolo_examples(source)
+        split = {"train": examples, "val": [], "test": []}
+        output_dir = tmp_path / "processed"
+
+        materialize_split(split, output_dir, class_names=["license_plate"])
+        # Simulate a leftover artifact from an unrelated prior run (e.g. an
+        # Ultralytics disk-cache .npy file) that a naive copy wouldn't clean up.
+        stale_file = output_dir / "train" / "images" / "stale.npy"
+        stale_file.write_bytes(b"leftover")
+
+        materialize_split(split, output_dir, class_names=["license_plate"])
+
+        assert not stale_file.exists()
+        assert len(list((output_dir / "train" / "images").iterdir())) == 2
+
     def test_missing_labels_get_empty_placeholder(self, tmp_path: Path) -> None:
         source = _make_flat_source(tmp_path / "source", n=2, with_labels=False)
         examples = find_yolo_examples(source)
@@ -168,3 +186,46 @@ class TestNormalizeYoloLabelText:
 
     def test_empty_text_yields_empty_string(self) -> None:
         assert normalize_yolo_label_text("") == ""
+
+
+def _examples(prefix: str, n: int) -> list[YoloExample]:
+    return [
+        YoloExample(image_path=Path(f"{prefix}{i}.jpg"), label_path=Path(f"{prefix}{i}.txt"))
+        for i in range(n)
+    ]
+
+
+class TestSampleBalancedSubset:
+    def test_splits_evenly_across_sources(self) -> None:
+        by_source = {"a": _examples("a", 100), "b": _examples("b", 100)}
+        sampled = sample_balanced_subset(by_source, max_examples=40, seed=1)
+        assert len(sampled) == 40
+        from_a = sum(1 for e in sampled if e.image_path.name.startswith("a"))
+        from_b = sum(1 for e in sampled if e.image_path.name.startswith("b"))
+        assert (from_a, from_b) == (20, 20)
+
+    def test_small_source_contributes_everything_rest_rolls_over(self) -> None:
+        # Source "a" only has 5 — can't fill its even 20-per-source share,
+        # so the shortfall should roll over to "b" instead of being dropped.
+        by_source = {"a": _examples("a", 5), "b": _examples("b", 100)}
+        sampled = sample_balanced_subset(by_source, max_examples=40, seed=1)
+        assert len(sampled) == 40
+        from_a = sum(1 for e in sampled if e.image_path.name.startswith("a"))
+        from_b = sum(1 for e in sampled if e.image_path.name.startswith("b"))
+        assert from_a == 5
+        assert from_b == 35
+
+    def test_max_examples_at_or_above_total_returns_everything(self) -> None:
+        by_source = {"a": _examples("a", 10), "b": _examples("b", 10)}
+        sampled = sample_balanced_subset(by_source, max_examples=1000, seed=1)
+        assert len(sampled) == 20
+
+    def test_deterministic_given_seed(self) -> None:
+        by_source = {"a": _examples("a", 50), "b": _examples("b", 50)}
+        first = sample_balanced_subset(by_source, max_examples=20, seed=7)
+        second = sample_balanced_subset(by_source, max_examples=20, seed=7)
+        assert [e.image_path for e in first] == [e.image_path for e in second]
+
+    def test_empty_sources_raises(self) -> None:
+        with pytest.raises(ValueError):
+            sample_balanced_subset({}, max_examples=10)
