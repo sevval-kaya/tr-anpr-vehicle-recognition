@@ -263,3 +263,26 @@ kayıpsız geri kazandırıyor.
 
 **Etki:** `scripts/prepare_plate_data.py` yeniden çalıştırıldı,
 `data/processed/plates/` yeniden üretildi — artık `0 corrupt` bekleniyor.
+
+## 16. Kullanıcının plaka veri seti eklendi + eğitim hızlandırıldı (batch, cache)
+
+**Karar:** Kullanıcının sağladığı 1.955 gerçek Türk plakası fotoğrafı
+(`data/external/user_plates/`, zaten temiz bbox formatında) Roboflow
+setiyle birleştirildi (`prepare_plate_data.py data/external/roboflow_plates
+data/external/user_plates` → 5.413 görüntü, 4330/541/542 train/val/test).
+Ayrıca eğitim, doğruluktan ödün vermeyen iki değişiklikle hızlandırıldı:
+`batch_size` 16→64, `cache: ram` eklendi.
+
+**Gerekçe:** İlk 100-epoch koşusunda (5.413 görüntülük yeni veriyle
+başlamadan önce, 3.458 görüntülük Roboflow-only sette) GPU VRAM kullanımı
+sadece ~3/8GB'ta kalıyordu (batch=16 ile GPU yeterince doldurulmuyordu) ve
+her epoch kaynak görüntüleri (bazıları 4608x2592 gibi yüksek çözünürlüklü)
+diskten yeniden okuyup yeniden decode ediyordu. `cache=ram`, görüntüleri
+bir kere decode/resize edip bellekte tutuyor. Epoch sayısını azaltmak
+**tercih edilmedi** — ilk koşuda mAP50 epoch 50'den (%77.1) epoch 100'e
+(%82.0) kadar gerçek anlamda iyileşmeye devam etti, yani 100 epoch
+gereksiz değildi.
+
+**Kullanıcı veri seti hakkında not:** Kaynağı/lisansı kullanıcı tarafından
+belirtilmedi ("benim eklediğim/indirdiğim"); harici paylaşım/yayın öncesi
+bu netleştirilmeli (bkz. `data/README.md`).
