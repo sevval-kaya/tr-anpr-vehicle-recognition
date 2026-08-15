@@ -22,7 +22,7 @@ detection = [
     "ultralytics>=8.3",
 ]
 ocr = [
-    "paddleocr>=2.8",
+    "paddleocr>=3.0",  # PlateOcr uses the predict()-based 3.x API; see docs/decisions.md #20
     "paddlepaddle>=2.6",
 ]
 classification = [
@@ -39,10 +39,14 @@ data = [
     "kaggle>=1.6",
     "roboflow>=1.1",
 ]
+labeling = [
+    "anthropic>=0.40",
+]
 serving = [
     "onnxruntime>=1.18",
     "fastapi>=0.111",
-    "uvicorn>=0.30",
+    "uvicorn[standard]>=0.30",  # [standard] pulls in websockets, needed by the live-camera endpoint
+    "python-multipart>=0.0.9",  # required by FastAPI for UploadFile (image/video upload endpoints)
 ]
 dev = [
     "pytest>=8.2",

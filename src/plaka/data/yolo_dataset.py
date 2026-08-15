@@ -23,7 +23,7 @@ import yaml
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".bmp"})
 
 
-def _long_path(path: Path) -> str:
+def long_path(path: Path) -> str:
     """Prefix an absolute path with \\\\?\\ on Windows to opt into the Win32
     extended-length path API (no ~260 char MAX_PATH limit). Source datasets
     (e.g. Roboflow exports) can contain filenames derived from long
@@ -210,17 +210,17 @@ def materialize_split(
 
         for example in split_examples:
             shutil.copy2(
-                _long_path(example.image_path),
-                _long_path(images_out / example.image_path.name),
+                long_path(example.image_path),
+                long_path(images_out / example.image_path.name),
             )
             label_dest = labels_out / f"{example.image_path.stem}.txt"
             if example.label_path.exists():
-                with open(_long_path(example.label_path), encoding="utf-8") as source_file:
+                with open(long_path(example.label_path), encoding="utf-8") as source_file:
                     normalized_text = normalize_yolo_label_text(source_file.read())
-                with open(_long_path(label_dest), "w", encoding="utf-8") as dest_file:
+                with open(long_path(label_dest), "w", encoding="utf-8") as dest_file:
                     dest_file.write(normalized_text)
             else:
-                open(_long_path(label_dest), "wb").close()
+                open(long_path(label_dest), "wb").close()
 
     data_yaml_path = output_dir / "data.yaml"
     _write_data_yaml(data_yaml_path, output_dir, class_names)

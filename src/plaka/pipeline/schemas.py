@@ -101,9 +101,17 @@ class VehicleDetection(BaseModel):
     and make/model prediction (if classification was run)."""
 
     box: BoundingBox
+    vehicle_type: str = Field(
+        description="COCO vehicle category from VehicleDetector, e.g. 'car'/'motorcycle'/'bus'/'truck'."
+    )
     detection_confidence: float = Field(ge=0.0, le=1.0)
     plate: PlateReading | None = None
-    make_model: MakeModelPrediction | None = None
+    make_model: MakeModelPrediction | None = Field(
+        default=None,
+        description="Set only when classification is enabled (configs/pipeline.yaml "
+        "classification.enabled) — see docs/decisions.md #29. Kept in the schema so "
+        "the make/model path can be re-enabled later without a data-model change.",
+    )
     track_id: int | None = Field(
         default=None,
         description="Stable ID across frames, set once temporal voting is wired in.",

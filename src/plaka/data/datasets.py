@@ -8,6 +8,7 @@ VMMRdb/Stanford Cars/CompCars naturally convert into and what
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 
@@ -103,3 +104,65 @@ def select_target_classes(
         raise ValueError(f"no classes under {root} matched target makes {target_makes}")
 
     return sorted(selected)
+
+
+def extract_brand(class_name: str) -> str:
+    """Extract the make/brand token from a `<make>_<model>_<year>`
+    VMMRdb-convention class name.
+
+    Splitting on the *first* underscore only is deliberate: it's the one
+    rule that handles every VMMRdb class correctly, including "mercedes
+    benz" (space-separated, no underscore inside the make itself, e.g.
+    "mercedes benz_190_1985" -> "mercedes benz") without needing a
+    special case for it.
+    """
+    return class_name.split("_", 1)[0]
+
+
+def aggregate_images_by_brand(
+    dataset_root: str | Path,
+    target_brands: list[str],
+    max_images_per_brand: int,
+    seed: int = 42,
+) -> dict[str, list[Path]]:
+    """Pool every image across all of a brand's raw `<make>_<model>_<year>`
+    class folders into one list per brand (restricted to `target_brands`),
+    then cap each brand's pool at `max_images_per_brand` via a deterministic
+    random sample — for collapsing a fine-grained (model+year) ImageFolder
+    dataset like VMMRdb into a coarser brand-only one, so a brand with a
+    couple of oversized model classes (e.g. Ford has 870 raw classes) doesn't
+    dominate over a brand with a single tiny one (e.g. Renault has 1).
+
+    Brands with fewer images than the cap contribute everything they have —
+    the cap only ever removes images, never pads a sparse brand out.
+
+    Returns {brand: [image_path, ...]}, only for brands that had at least
+    one matching image (a target brand entirely absent from the dataset —
+    e.g. a make VMMRdb never collected — is simply omitted, not an error).
+
+    Raises:
+        FileNotFoundError: if dataset_root doesn't exist.
+    """
+    root = Path(dataset_root)
+    if not root.is_dir():
+        raise FileNotFoundError(f"dataset root not found: {root}")
+
+    target_set = set(target_brands)
+    pools: dict[str, list[Path]] = {}
+    for class_dir in sorted(root.iterdir()):
+        if not class_dir.is_dir():
+            continue
+        brand = extract_brand(class_dir.name)
+        if brand not in target_set:
+            continue
+        images = [p for p in class_dir.iterdir() if p.suffix.lower() in IMAGE_EXTENSIONS]
+        pools.setdefault(brand, []).extend(images)
+
+    rng = random.Random(seed)
+    capped: dict[str, list[Path]] = {}
+    for brand, images in pools.items():
+        if len(images) > max_images_per_brand:
+            capped[brand] = rng.sample(images, max_images_per_brand)
+        else:
+            capped[brand] = images
+    return capped

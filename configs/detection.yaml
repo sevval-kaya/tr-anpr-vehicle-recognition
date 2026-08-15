@@ -1,5 +1,6 @@
 # Detection stage config: vehicle detector (COCO-pretrained baseline) and
-# plate detector (requires custom training — see docs/roadmap.md stage 2).
+# plate detector (retrained at 640px on the same 1750-image balanced
+# subset as decision #18 — see docs/decisions.md #22).
 
 vehicle_detector:
   weights_path: "yolo11n.pt"   # auto-downloaded by ultralytics on first use
@@ -7,19 +8,32 @@ vehicle_detector:
   classes: ["car", "motorcycle", "bus", "truck"]  # subset of COCO used
 
 plate_detector:
-  weights_path: "models/plate_detector/best.pt"  # not present until trained
+  # Reverted to the #22 checkpoint (decision #38) after the #35 light
+  # fine-tune (19 pseudo-labels from arac3.mp4) improved the held-out
+  # window (8->10 valid frames) but, measured on the FULL video, actually
+  # dropped the count of distinct correctly-read vehicles from 2 to 1 —
+  # a net loss, not a net gain. The fine-tuned checkpoint is kept at
+  # models/plate_detector_arac3_finetune/ as an experimental artifact,
+  # not wired in. Self-training at this scale (19 images) is documented
+  # as too risky to ship on this evidence — see docs/decisions.md #38.
+  weights_path: "models/plate_detector/best.pt"
   confidence_threshold: 0.5
-  architecture: "yolo11n"  # local-machine-light baseline; see docs/decisions.md #18
-  input_size: 416
+  architecture: "yolo11n"  # still nano — see docs/decisions.md #22 (resolution/data mattered more than model size for recall)
+  input_size: 640
 
 training:
-  epochs: 35
+  epochs: 100  # early-stopped at epoch 65 via patience — see docs/decisions.md #22
   batch_size: 16
-  image_size: 416   # plates are a large-enough object in frame that this doesn't hurt much
-  patience: 10       # early stopping — tight, since the epoch budget itself is small
+  image_size: 640   # bumped from 416 — recall was bottlenecked by small/low-pixel plate
+                     # crops, not by plate size relative to the whole frame; see #22
+  patience: 10       # early stopping
   device: "0"        # first CUDA GPU; "cpu" to force CPU
   workers: 3         # DataLoader worker processes — kept low to leave the machine usable
   cache: "disk"  # NOT "ram": on Windows, spawn-based DataLoader workers each re-pickle the
                  # full RAM cache into their own process, multiplying memory by `workers` —
                  # crashed with MemoryError at workers=8. "disk" avoids repeated decode of large
                  # source images without that blowup; see docs/decisions.md #17.
+                 # data.yaml still points at the same 1750-image balanced subset from
+                 # decision #18 (1400/175/175) — NOT the full 5.413-image merged set;
+                 # see docs/decisions.md #22 for the resolution-only retraining this
+                 # config now reflects.

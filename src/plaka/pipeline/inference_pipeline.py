@@ -31,6 +31,14 @@ logger = get_logger(__name__)
 # than guess-assigned in a multi-vehicle scene.
 MIN_PLATE_CONTAINMENT_RATIO = 0.5
 
+# A zero-padding plate crop (the detector's box exactly, no margin) makes
+# PaddleOCR's text detector return nothing at all — confirmed empirically:
+# a perfectly legible plate went from 0.0 confidence / empty text at 0px
+# padding to >0.96 confidence at just 10px. 15% margin comfortably covers
+# that while staying well short of pulling in dealer/city frame text,
+# which sits outside the tight plate box entirely (see docs/decisions.md).
+PLATE_CROP_PADDING_RATIO = 0.15
+
 
 class InferencePipeline:
     """Runs vehicle detection, plate detection+OCR, and make/model
@@ -42,12 +50,19 @@ class InferencePipeline:
         vehicle_detector: VehicleDetectorProtocol,
         plate_detector: PlateDetectorProtocol,
         plate_ocr: PlateOcrProtocol,
-        vehicle_classifier: VehicleClassifierProtocol,
+        vehicle_classifier: VehicleClassifierProtocol | None = None,
         plate_validator: TurkishPlateValidator | None = None,
     ) -> None:
         self._vehicle_detector = vehicle_detector
         self._plate_detector = plate_detector
         self._plate_ocr = plate_ocr
+        # Make/model classification is opt-in, not opt-out — see decision #29:
+        # accuracy across three real-data attempts never exceeded random-guess
+        # level, so scope moved to vehicle-type + plate. The classifier path
+        # (this attribute, the crop, MakeModelPrediction in schemas.py) stays
+        # wired so it can be re-enabled once labeled volume is large enough;
+        # pass a VehicleClassifier + set configs/pipeline.yaml
+        # classification.enabled: true to turn it back on.
         self._vehicle_classifier = vehicle_classifier
         self._plate_validator = plate_validator or TurkishPlateValidator()
 
@@ -58,17 +73,20 @@ class InferencePipeline:
 
         vehicles: list[VehicleDetection] = []
         for raw_vehicle in raw_vehicles:
-            crop = _crop(frame_bgr, raw_vehicle.box)
-            if crop.size == 0:
-                logger.warning("empty vehicle crop at %s, skipping", raw_vehicle.box)
-                continue
+            make_model = None
+            if self._vehicle_classifier is not None:
+                crop = _crop(frame_bgr, raw_vehicle.box)
+                if crop.size == 0:
+                    logger.warning("empty vehicle crop at %s, skipping", raw_vehicle.box)
+                    continue
+                make_model = self._vehicle_classifier.predict(crop)
 
-            make_model = self._vehicle_classifier.predict(crop)
             plate_reading = self._read_matching_plate(raw_vehicle.box, raw_plates, frame_bgr)
 
             vehicles.append(
                 VehicleDetection(
                     box=raw_vehicle.box,
+                    vehicle_type=raw_vehicle.class_name,
                     detection_confidence=raw_vehicle.confidence,
                     plate=plate_reading,
                     make_model=make_model,
@@ -90,7 +108,7 @@ class InferencePipeline:
         if vehicle_box.containment_ratio(best_plate.box) < MIN_PLATE_CONTAINMENT_RATIO:
             return None
 
-        plate_crop = _crop(frame_bgr, best_plate.box)
+        plate_crop = _crop(frame_bgr, best_plate.box, padding_ratio=PLATE_CROP_PADDING_RATIO)
         if plate_crop.size == 0:
             return None
 
@@ -108,5 +126,20 @@ class InferencePipeline:
         )
 
 
-def _crop(frame_bgr: NDArray[np.uint8], box: BoundingBox) -> NDArray[np.uint8]:
-    return frame_bgr[int(box.y_min) : int(box.y_max), int(box.x_min) : int(box.x_max)]
+def _crop(
+    frame_bgr: NDArray[np.uint8], box: BoundingBox, padding_ratio: float = 0.0
+) -> NDArray[np.uint8]:
+    """Crop `box` out of `frame_bgr`, optionally expanded by `padding_ratio`
+    (fraction of the box's own width/height, added on each side and
+    clamped to the frame), then clamped to the frame bounds.
+    """
+    frame_height, frame_width = frame_bgr.shape[:2]
+    pad_x = box.width * padding_ratio
+    pad_y = box.height * padding_ratio
+
+    x_min = max(0, int(box.x_min - pad_x))
+    y_min = max(0, int(box.y_min - pad_y))
+    x_max = min(frame_width, int(box.x_max + pad_x))
+    y_max = min(frame_height, int(box.y_max + pad_y))
+
+    return frame_bgr[y_min:y_max, x_min:x_max]

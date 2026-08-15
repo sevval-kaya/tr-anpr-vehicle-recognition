@@ -5,6 +5,15 @@ detection_config: "configs/detection.yaml"
 ocr_config: "configs/ocr.yaml"
 classification_config: "configs/classification.yaml"
 
+classification:
+  # Make/model classification is disabled by default — see docs/decisions.md
+  # #29: three real-data attempts (Kaggle catalog, VMMRdb-brand, manual
+  # Turkey labels) never beat random-guess accuracy; current scope is
+  # vehicle-type (car/motorcycle/bus/truck, from VehicleDetector) + plate
+  # only. Flip to true (and re-check models/vehicle_classifier/best.pt is a
+  # checkpoint worth serving) once labeled volume is large enough to revisit.
+  enabled: false
+
 matching:
   # Fraction of a plate box that must fall inside a vehicle box for the two
   # to be associated (see plaka.pipeline.inference_pipeline.MIN_PLATE_CONTAINMENT_RATIO).

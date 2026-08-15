@@ -37,6 +37,7 @@ from typing import Any, cast
 import timm
 import torch
 import torch.nn.functional as F
+import torchvision.transforms as T
 import yaml
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -116,6 +117,51 @@ def _freeze_backbone(model: torch.nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
+def _unfreeze_last_block(model: torch.nn.Module) -> int:
+    """Freeze everything except the classifier head, the final MBConv
+    stage (`blocks[-1]`), and the head convolution that feeds it
+    (`conv_head`/`bn2`) — a lighter fine-tune than unfreezing the whole
+    backbone. On a small dataset, giving the last (most task-specific)
+    stage room to adapt while keeping the early, more generic
+    edge/texture layers fixed is a common middle ground between "frozen
+    everywhere" (may underfit a domain-shifted target) and "fully
+    unfrozen" (overfits fast with little data).
+
+    Only implemented for timm's EfficientNet-family module layout
+    (conv_stem/bn1/blocks/conv_head/bn2/classifier) — see
+    docs/decisions.md #27.
+
+    Returns the number of trainable parameters left, for logging.
+    """
+    m = cast(Any, model)
+    trainable_modules = [m.blocks[-1], m.conv_head, m.bn2, m.get_classifier()]
+    trainable_param_ids = {id(p) for module in trainable_modules for p in module.parameters()}
+    for param in model.parameters():
+        param.requires_grad = id(param) in trainable_param_ids
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def _build_train_transform(data_config: dict[str, Any], image_size: int) -> Any:
+    """Explicit, strong augmentation for small datasets: random-resized
+    crop, color jitter, horizontal flip, and a slight rotation — timm's
+    default `create_transform(is_training=True)` only does crop+flip,
+    which isn't much of a regularizer when there are only a handful of
+    images per class (see docs/decisions.md #27).
+    """
+    mean = data_config["mean"]
+    std = data_config["std"]
+    return T.Compose(
+        [
+            T.RandomResizedCrop(image_size, scale=(0.7, 1.0)),
+            T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.05),
+            T.RandomHorizontalFlip(),
+            T.RandomRotation(degrees=15),
+            T.ToTensor(),
+            T.Normalize(mean=mean, std=std),
+        ]
+    )
+
+
 def _evaluate(
     model: torch.nn.Module,
     loader: DataLoader[tuple[torch.Tensor, int]],
@@ -150,17 +196,22 @@ def train(
     epochs_override: int | None,
     image_size_override: int | None,
     freeze_backbone_override: bool | None,
+    freeze_mode: str | None,
+    strong_augmentation: bool,
+    patience: int | None,
     num_workers: int,
     seed: int,
 ) -> None:
     device = torch.device(config["vehicle_classifier"]["device"])
     architecture = config["vehicle_classifier"]["architecture"]
     pretrained = bool(config["training"]["pretrained_backbone"])
-    freeze_backbone = (
-        freeze_backbone_override
-        if freeze_backbone_override is not None
-        else bool(config["training"].get("freeze_backbone", False))
-    )
+    if freeze_mode is None:
+        freeze_backbone = (
+            freeze_backbone_override
+            if freeze_backbone_override is not None
+            else bool(config["training"].get("freeze_backbone", False))
+        )
+        freeze_mode = "full" if freeze_backbone else "none"
     epochs = epochs_override or int(config["training"]["epochs_pretrain"])
     batch_size = int(config["training"]["batch_size"])
     learning_rate = float(config["training"]["learning_rate"])
@@ -192,17 +243,30 @@ def train(
     model = timm.create_model(architecture, pretrained=pretrained, num_classes=len(class_names))
     model.to(device)
 
-    if freeze_backbone:
+    if freeze_mode == "full":
         trainable_params = _freeze_backbone(model)
         logger.info(
             "Backbone frozen; %d trainable parameters (classifier head only)", trainable_params
         )
+    elif freeze_mode == "partial":
+        trainable_params = _unfreeze_last_block(model)
+        logger.info(
+            "Backbone partially frozen; %d trainable parameters "
+            "(last block + conv_head + classifier)",
+            trainable_params,
+        )
+    elif freeze_mode != "none":
+        raise ValueError(f"freeze_mode must be one of full/partial/none, got {freeze_mode!r}")
 
     # timm.data doesn't ship a py.typed marker for these helpers.
     data_config = timm.data.resolve_data_config(  # type: ignore[attr-defined,no-untyped-call]
         {"input_size": (3, image_size, image_size)}, model=model
     )
-    train_transform = timm.data.create_transform(**data_config, is_training=True)  # type: ignore[attr-defined]
+    train_transform = (
+        _build_train_transform(data_config, image_size)
+        if strong_augmentation
+        else timm.data.create_transform(**data_config, is_training=True)  # type: ignore[attr-defined]
+    )
     eval_transform = timm.data.create_transform(**data_config, is_training=False)  # type: ignore[attr-defined]
 
     train_dataset = ImageFolderDataset(
@@ -235,6 +299,7 @@ def train(
     optimizer = torch.optim.AdamW(trainable_parameters, lr=learning_rate)
     output_dir.mkdir(parents=True, exist_ok=True)
     best_val_top1 = 0.0
+    epochs_since_improvement = 0
 
     for epoch in range(epochs):
         model.train()
@@ -261,10 +326,31 @@ def train(
         )
 
         if val_top1 >= best_val_top1:
+            # >= (not >) so a tie still re-saves the latest weights within
+            # a plateau — but that means a tie must NOT reset the early
+            # stopping counter below, or a metric stuck at the same value
+            # (easy with a val set this small — e.g. 6 images means only
+            # 7 possible val_top1 values) would never trigger it.
+            strictly_improved = val_top1 > best_val_top1
             best_val_top1 = val_top1
             torch.save(model.state_dict(), output_dir / "best.pt")
             write_class_names(class_names, output_dir / "classes.txt")
             logger.info("New best checkpoint saved (val_top1=%.4f)", val_top1)
+            if strictly_improved:
+                epochs_since_improvement = 0
+            else:
+                epochs_since_improvement += 1
+        else:
+            epochs_since_improvement += 1
+
+        if patience is not None and epochs_since_improvement >= patience:
+            logger.info(
+                "Early stopping at epoch %d/%d (%d epoch(s) without val_top1 improvement)",
+                epoch + 1,
+                epochs,
+                epochs_since_improvement,
+            )
+            break
 
     logger.info("Training complete. Best val_top1=%.4f", best_val_top1)
 
@@ -308,7 +394,29 @@ def main(argv: list[str] | None = None) -> int:
         "--freeze-backbone",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Freeze all but the classifier head (default: configs/classification.yaml).",
+        help="Freeze all but the classifier head (default: configs/classification.yaml). "
+        "Superseded by --freeze-mode if that's also given.",
+    )
+    parser.add_argument(
+        "--freeze-mode",
+        choices=["full", "partial", "none"],
+        default=None,
+        help="'full' = classifier head only (like --freeze-backbone); 'partial' = also "
+        "unfreeze the backbone's last block + conv_head (see docs/decisions.md #27); "
+        "'none' = fully unfrozen. Overrides --freeze-backbone when given.",
+    )
+    parser.add_argument(
+        "--strong-augmentation",
+        action="store_true",
+        help="Use explicit random-crop + color-jitter + flip + rotation augmentation "
+        "instead of timm's default (crop+flip only) — recommended for small datasets.",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=None,
+        help="Stop early if val_top1 doesn't improve for this many consecutive epochs "
+        "(default: no early stopping, run the full --epochs budget).",
     )
     parser.add_argument(
         "--num-workers",
@@ -330,6 +438,9 @@ def main(argv: list[str] | None = None) -> int:
         epochs_override=args.epochs,
         image_size_override=args.image_size,
         freeze_backbone_override=args.freeze_backbone,
+        freeze_mode=args.freeze_mode,
+        strong_augmentation=args.strong_augmentation,
+        patience=args.patience,
         num_workers=args.num_workers,
         seed=args.seed,
     )

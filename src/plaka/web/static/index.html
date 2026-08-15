@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Plaka Tanıma Sistemi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">TR</span>
+      <div>
+        <h1>Plaka Tanıma Sistemi</h1>
+        <p class="subtitle">Araç tipi tespiti · Plaka okuma · Fotoğraf, video ve canlı kamera</p>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab-btn active" data-tab="photo" role="tab" aria-selected="true">
+      <i data-lucide="image"></i> Fotoğraf
+    </button>
+    <button class="tab-btn" data-tab="video" role="tab" aria-selected="false">
+      <i data-lucide="video"></i> Video
+    </button>
+    <button class="tab-btn" data-tab="camera" role="tab" aria-selected="false">
+      <i data-lucide="camera"></i> Canlı Kamera
+    </button>
+  </nav>
+
+  <main class="container">
+
+    <!-- PHOTO -->
+    <section id="panel-photo" class="panel active">
+      <div class="card upload-card">
+        <label class="dropzone" id="photo-dropzone">
+          <input type="file" id="photo-input" accept="image/*" hidden />
+          <i data-lucide="upload-cloud" class="dropzone-icon"></i>
+          <div class="dropzone-text">Bir fotoğraf seçin ya da buraya sürükleyin</div>
+          <div class="dropzone-hint">JPG, PNG</div>
+        </label>
+        <button class="btn primary" id="photo-submit" disabled>
+          <i data-lucide="scan-line"></i> Analiz Et
+        </button>
+      </div>
+
+      <div class="card result-card hidden" id="photo-result">
+        <div class="result-grid">
+          <div class="result-image-wrap">
+            <img id="photo-result-image" alt="Analiz sonucu" />
+          </div>
+          <div class="result-side">
+            <h3>Tespit Edilen Araçlar</h3>
+            <table class="results-table" id="photo-results-table">
+              <thead><tr><th>Tip</th><th>Plaka</th><th>Güven</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="status-line" id="photo-status"></div>
+    </section>
+
+    <!-- VIDEO -->
+    <section id="panel-video" class="panel">
+      <div class="card upload-card">
+        <label class="dropzone" id="video-dropzone">
+          <input type="file" id="video-input" accept="video/*" hidden />
+          <i data-lucide="upload-cloud" class="dropzone-icon"></i>
+          <div class="dropzone-text">Bir video seçin ya da buraya sürükleyin</div>
+          <div class="dropzone-hint">MP4, MOV, AVI</div>
+        </label>
+        <div class="video-options">
+          <div class="option-field rotate-field">
+            <span>Döndürme</span>
+            <div class="rotate-thumbnails" id="rotate-thumbnails">
+              <button type="button" class="rotate-thumb selected" data-rotate="0">
+                <span class="rotate-thumb-canvas-wrap"><canvas></canvas></span>
+                <span class="rotate-thumb-label">
+                  <i data-lucide="check" class="rotate-thumb-check"></i>0°
+                </span>
+              </button>
+              <button type="button" class="rotate-thumb" data-rotate="90">
+                <span class="rotate-thumb-canvas-wrap"><canvas></canvas></span>
+                <span class="rotate-thumb-label">
+                  <i data-lucide="check" class="rotate-thumb-check"></i>90°
+                </span>
+              </button>
+              <button type="button" class="rotate-thumb" data-rotate="180">
+                <span class="rotate-thumb-canvas-wrap"><canvas></canvas></span>
+                <span class="rotate-thumb-label">
+                  <i data-lucide="check" class="rotate-thumb-check"></i>180°
+                </span>
+              </button>
+              <button type="button" class="rotate-thumb" data-rotate="270">
+                <span class="rotate-thumb-canvas-wrap"><canvas></canvas></span>
+                <span class="rotate-thumb-label">
+                  <i data-lucide="check" class="rotate-thumb-check"></i>270°
+                </span>
+              </button>
+            </div>
+            <span class="option-hint" id="rotate-hint">
+              Video seçtiğinizde burada 4 önizleme belirir — araç/yol hangisinde dik
+              duruyorsa ona tıklayın, derece bilmenize gerek yok.
+            </span>
+          </div>
+          <label class="option-field">
+            <span>Örnekleme sıklığı</span>
+            <select id="video-sample-interval">
+              <option value="" selected>Tam kare (varsayılan — plaka kaçırma riski en düşük)</option>
+              <option value="0.5">0.5 saniyede bir — hızlı önizleme, plaka kaçırabilir</option>
+              <option value="1">1 saniyede bir — hızlı önizleme, plaka kaçırabilir</option>
+              <option value="2">2 saniyede bir — hızlı önizleme, plaka kaçırabilir</option>
+            </select>
+            <span class="option-hint" id="sample-interval-hint"></span>
+          </label>
+        </div>
+        <button class="btn primary" id="video-submit" disabled>
+          <i data-lucide="upload"></i> Yükle ve İşle
+        </button>
+      </div>
+
+      <div class="card hidden" id="video-progress-card">
+        <div class="progress-row">
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="video-progress-fill"></div>
+          </div>
+          <span id="video-progress-label">%0</span>
+        </div>
+        <p class="status-line" id="video-status">Video işleniyor…</p>
+        <p class="status-line" id="video-eta"></p>
+      </div>
+
+      <div class="card result-card hidden" id="video-result">
+        <div class="summary-row" id="video-summary"></div>
+        <div class="video-actions">
+          <a class="btn secondary" id="video-download" download>
+            <i data-lucide="download"></i> İşlenmiş Videoyu İndir
+          </a>
+        </div>
+        <h3>Tespit Edilen Araçlar</h3>
+        <div class="plate-gallery" id="video-plate-gallery"></div>
+      </div>
+    </section>
+
+    <!-- CAMERA -->
+    <section id="panel-camera" class="panel">
+      <div class="card camera-card">
+        <div class="camera-controls">
+          <button class="btn primary" id="camera-start">
+            <i data-lucide="play"></i> Kamerayı Başlat
+          </button>
+          <button class="btn secondary hidden" id="camera-stop">
+            <i data-lucide="square"></i> Durdur
+          </button>
+          <span class="status-line" id="camera-status"></span>
+        </div>
+        <div class="camera-view">
+          <video id="camera-raw" autoplay playsinline muted hidden></video>
+          <img id="camera-annotated" alt="Canlı analiz" hidden />
+          <div class="camera-placeholder" id="camera-placeholder">
+            <i data-lucide="camera-off"></i> Kamera henüz başlatılmadı
+          </div>
+        </div>
+        <table class="results-table" id="camera-results-table">
+          <thead><tr><th>Tip</th><th>Plaka</th><th>Güven</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <canvas id="camera-canvas" hidden></canvas>
+  <script src="/static/app.js"></script>
+</body>
+</html>

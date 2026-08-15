@@ -4,6 +4,12 @@ data/processed/plates/ (see scripts/prepare_plate_data.py).
 
     python scripts/train_detector.py data/processed/plates/data.yaml
 
+    # Light fine-tune from an existing checkpoint instead of training from
+    # scratch (small LR, frozen backbone, a handful of epochs):
+    python scripts/train_detector.py data/processed/plate_finetune_arac3/data_finetune.yaml \
+        --base-weights models/plate_detector/best.pt --lr0 0.0005 --freeze 10 \
+        --epochs 15 --output-dir models/plate_detector_arac3_finetune
+
 Writes the best checkpoint to models/plate_detector/best.pt, matching the
 path PlateDetector reads by default (configs/detection.yaml), and reports
 mAP@0.5 / mAP@0.5:0.95 / precision / recall from a post-training validation
@@ -46,6 +52,9 @@ def train(
     device_override: str | None,
     workers_override: int | None,
     cache_override: str | bool | None,
+    base_weights_override: str | None = None,
+    lr0_override: float | None = None,
+    freeze_override: int | None = None,
 ) -> Path:
     """Train the plate detector and copy the best checkpoint to `output_dir`.
 
@@ -60,7 +69,7 @@ def train(
     plate_detector_config = config["plate_detector"]
     training_config = config["training"]
 
-    base_weights = f"{plate_detector_config['architecture']}.pt"
+    base_weights = base_weights_override or f"{plate_detector_config['architecture']}.pt"
     epochs = epochs_override or int(training_config["epochs"])
     image_size = image_size_override or int(training_config["image_size"])
     batch = batch_override or int(training_config["batch_size"])
@@ -78,7 +87,7 @@ def train(
 
     logger.info(
         "Training plate detector: base=%s epochs=%d imgsz=%d batch=%d "
-        "device=%s workers=%d cache=%s",
+        "device=%s workers=%d cache=%s lr0=%s freeze=%s",
         base_weights,
         epochs,
         image_size,
@@ -86,7 +95,21 @@ def train(
         device,
         workers,
         cache,
+        lr0_override if lr0_override is not None else "(default)",
+        freeze_override if freeze_override is not None else "(none)",
     )
+
+    train_kwargs: dict[str, Any] = {}
+    if lr0_override is not None:
+        # Also lowers the final LR proportionally (lrf is a *fraction* of
+        # lr0 in Ultralytics) so a light fine-tune doesn't end training on
+        # BASELINE_lr0*default_lrf, which would be larger than lr0 itself.
+        train_kwargs["lr0"] = lr0_override
+    if freeze_override is not None:
+        # Freezes the first N layers (backbone) so the fine-tune only
+        # adapts the later/head layers to the new angle instead of
+        # re-learning general plate-vs-background features from 19 images.
+        train_kwargs["freeze"] = freeze_override
 
     model = YOLO(base_weights)
     model.train(
@@ -101,6 +124,7 @@ def train(
         project=str(runs_dir),
         name=output_dir.name,
         exist_ok=True,
+        **train_kwargs,
     )
 
     assert model.trainer is not None, "trainer is set by YOLO.train() on success"
@@ -166,6 +190,24 @@ def main(argv: list[str] | None = None) -> int:
         choices=["ram", "disk", "false"],
         help="Image caching mode (speeds up epochs after the first, at the cost of memory/disk).",
     )
+    parser.add_argument(
+        "--base-weights",
+        type=str,
+        default=None,
+        help="Start from these weights instead of the fresh COCO-pretrained "
+        "'{architecture}.pt' — e.g. models/plate_detector/best.pt for a light "
+        "fine-tune rather than training from scratch.",
+    )
+    parser.add_argument(
+        "--lr0", type=float, default=None, help="Override the initial learning rate."
+    )
+    parser.add_argument(
+        "--freeze",
+        type=int,
+        default=None,
+        help="Freeze the first N layers (backbone) — keeps a fine-tune from a real "
+        "checkpoint from re-learning general features off a tiny dataset.",
+    )
     args = parser.parse_args(argv)
 
     config = _load_config(args.config)
@@ -183,6 +225,9 @@ def main(argv: list[str] | None = None) -> int:
         device_override=args.device,
         workers_override=args.workers,
         cache_override=cache_override,
+        base_weights_override=args.base_weights,
+        lr0_override=args.lr0,
+        freeze_override=args.freeze,
     )
     return 0
 

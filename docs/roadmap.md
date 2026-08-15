@@ -29,22 +29,32 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
   - [ ] Türk plaka veri seti (Kaggle) — CC0 lisanslı, YOLO formatında bbox
     etiketli olduğu sayfa metadata'sından doğrulandı (indirmeden), ama
     henüz indirilmedi; Kaggle kimlik bilgisi kurulumu kullanıcıya bırakıldı.
-  - [x] Plaka dedektörü — **hafif yerel baseline eğitildi**:
-    `scripts/train_detector.py`, `yolo11n`, 416px, 35 epoch (~6.5 dakika),
-    1750 görüntülük dengeli alt küme (Roboflow + kullanıcı verisi),
-    batch=16, workers=3, "Below Normal" işlem önceliği (bkz.
-    `docs/decisions.md` #18). **Sonuç: mAP50 %68.7, mAP50-95 %46.6,
-    precision %91.8, recall %61.9.** Checkpoint `models/plate_detector/best.pt`
-    (5.4MB), `PlateDetector.detect()` ile gerçek test görüntülerinde
-    doğrulandı.
+  - [x] Plaka dedektörü — **416px baseline'dan 640px'e yeniden eğitildi**:
+    aynı `yolo11n`, aynı 1750 görüntülük dengeli alt küme (Roboflow +
+    kullanıcı verisi), sadece `image_size` 416→640, `epochs` 35→100
+    (patience=10 ile epoch 65'te erken durdu) (bkz. `docs/decisions.md`
+    #22). **Sonuç: mAP50 %79.1, mAP50-95 %53.6, precision %88.7, recall
+    %61.9→%75.4.** OCR pilotunda (karar #21) tekrarlanan hata sınıfının
+    (küçük/düşük-pikselli kırpımlarda karakter kaçırma) çözünürlük
+    artışıyla düzelip düzelmeyeceği hipotezi doğrulandı — recall
+    iyileşmesi veri hacminden değil tek başına çözünürlükten geldi (veri
+    seti değişmedi). Checkpoint `models/plate_detector/best.pt` (5.4MB)
+    güncellendi.
     Not: `yolo26n` + tam veri (5.413 görüntü) + 100 epoch ile daha önce bir
     kez mAP50 %82.0 elde edilmişti, ama o checkpoint yeniden eğitim
     denemeleri sırasında silindi ve `cache='ram'` denemesi makinenin 16GB
     RAM'ini aşıp `MemoryError`'a yol açtı (bkz. `docs/decisions.md` #17).
-    Kullanıcı, sistem kullanılabilirliğini korumak için daha hafif
-    ayarlarla devam etmeyi tercih etti — daha yüksek doğruluk isteniyorsa
-    tam veri/model/epoch ile (`cache='disk'` ile, artık güvenli) tekrar
-    eğitilebilir.
+    Tam birleşik veri setiyle 640px'te eğitim henüz denenmedi — çözünürlük
+    kazancının üstüne veri hacminin ek katkısı olup olmadığı hâlâ açık.
+  - [x] **Kapsam değişikliği (karar #29):** marka/model sınıflandırma
+    varsayılan akıştan çıkarıldı (üç ayrı gerçek-veri denemesi
+    rastgele-tahmin seviyesini geçemedi — #25, #26, #27), yerine **araç
+    tipi (car/motorcycle/bus/truck) + plaka** kondu. Kod silinmedi,
+    `configs/pipeline.yaml` → `classification.enabled: false` ile
+    tek satırlık geri açma bırakıldı. Aynı kararla
+    `scripts/run_inference_video.py`'ye canlı kamera için threaded
+    (üretici/tüketici) yakalama eklendi — mekanizması ölçülüp
+    doğrulandı (bkz. #29).
   - [x] Marka/model sınıflandırıcı — **gerçek ölçekli baseline eğitildi**:
     `scripts/train_classifier.py --turkey-subset`, 200 sınıf (Türkiye'de
     yaygın 20 marka, `plaka.data.select_target_classes` ile markalar
@@ -59,22 +69,39 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
     ~17 dakika. Checkpoint `models/vehicle_classifier/` altında,
     `VehicleClassifier.predict()` ile gerçek bir görüntüde doğru tahmin
     verdiği teyit edildi.
-  - [ ] Baseline pipeline'ın (`InferencePipeline`: araç tespiti → plaka
+  - [x] Baseline pipeline'ın (`InferencePipeline`: araç tespiti → plaka
     tespiti → OCR → format doğrulama → marka/model sınıflandırma) gerçek
-    görüntülerle uçtan uca smoke test'i — artık her iki model de hazır.
-  - [ ] Plaka **OCR**'ı henüz eğitilmedi ve eğitilemez durumda: ne
-    Roboflow ne Kaggle veri seti plaka metnini (örn. "34 ABC 123")
-    etiketliyor, ikisi de yalnızca bbox tespiti için. Şimdilik
-    `PlateOcr`, PaddleOCR'ın hazır (bizim eğitmediğimiz) ağırlıklarıyla
-    çalışacak; gerçek ince ayar için plaka-metni etiketli veri toplanmalı
-    (3. aşama).
+    görüntülerle uçtan uca smoke test'i — `scripts/run_inference.py`
+    yazıldı, 5 gerçek görüntüde çalıştırıldı. İlk çalıştırmada iki gerçek
+    boru hattı hatası bulundu ve düzeltildi: sıfır-dolgulu plaka
+    kırpımları PaddleOCR'ın dedektörünü tamamen susturuyordu, ve düşük
+    mutlak piksel yüksekliğindeki kırpımlar dolgudan bağımsız olarak
+    kaçırılıyordu (bkz. `docs/decisions.md` #23). Düzeltmelerden sonra
+    5/5 görüntüde geçerli plaka okundu.
+  - [x] Plaka **OCR** — `PlateOcr`, `paddleocr` paketi ilk kez gerçekten
+    kurulup çalıştırıldığında tamamen bozuk çıktı (3.x'e geçişte kırılan
+    API); yeniden yazıldı + bölge-birleştirme mantığı eklendi (bkz.
+    `docs/decisions.md` #20). Kullanıcının Claude-vision ile ücretsiz elle
+    etiketlediği 42 gerçek plaka üzerinde **ince ayar yapılmadan** ölçülen
+    baseline: **tam eşleşme %97.6, CER %0.64**. **Zorlu senaryo (gece/karanlık/
+    bulanık/küçük) 10 örnekte de aynı sonuç: tam eşleşme %90, CER %5.4**
+    (bkz. `docs/decisions.md` #21) — OCR *tanıma* doğruluğu zaten yeterli;
+    tekrar eden tek hata sınıfı (küçük/düşük-çözünürlüklü kırpımlarda
+    karakter kaçırma) plaka dedektörünün sorumluluğunda. **Sonuç: OCR ince
+    ayarı için veri toplamaya devam edilmeyecek, öncelik plaka dedektörü
+    recall'ını (%61.9) iyileştirmeye kaydı.**
 - [ ] **3. Veri Toplama ve Etiketleme** — Gerçek Türk trafik/plaka
   görüntülerinin toplanması ve etiketlenmesi.
 - [ ] **4. İnce Ayar (Fine-tuning)** — Toplanan veriyle yeniden eğitim,
   Türkiye'de yaygın marka/modellere ağırlık verme.
 - [ ] **5. Zorlu Senaryo Testi** — Gece, yağmur, açılı çekim testleri, hata
   analizi. Perspektif düzeltme ihtiyacı burada değerlendirilecek (bkz.
-  `docs/decisions.md` #4).
+  `docs/decisions.md` #4). **Altyapı hazır** (karar #28-#38): video
+  döndürme desteği, saniye-bazlı örnekleme, kare-arası araç izleme +
+  plaka/tip konsensüsü, web arayüzü (fotoğraf/video/canlı kamera) — hepsi
+  `arac2.mp4`/`arac3.mp4` üzerinde doğrulandı. Sıradaki adım: elde
+  yeni bir gerçek trafik videosu (farklı açı/mesafe/ışık) çıkarsa aynı
+  altyapıyla hızlı bir tur atıp sürpriz bulgu var mı bakmak.
 - [ ] **6. Dağıtım Optimizasyonu** — Deployment hedefi netleştiğinde
   ONNX/TensorRT ile hızlandırma.
 - [ ] **7. İzleme ve Sürekli İyileştirme** — Üretim performans izleme,
@@ -82,12 +109,53 @@ Proje dokümanının 7. bölümündeki aşamalar, bu repodaki somut ilerlemeyle.
 
 ## Şu an nerede duruyoruz
 
-Aşama 1 tamamlandı. Aşama 2'de: hem plaka dedektörü (hafif yerel baseline,
-mAP50 %68.7) hem marka/model sınıflandırıcı (val_top1 %28.3) GPU'da
-eğitildi ve ayrı ayrı gerçek görüntülerle doğrulandı. Sırada:
-`InferencePipeline` üzerinden ikisini birlikte uçtan uca test etmek; daha
-yüksek doğruluk isteniyorsa dedektörü tam veri/model/epoch ile yeniden
-eğitmek (`cache='disk'` artık güvenli, ~1-1.5 saat sürer); ve plaka OCR'ı
-için — hangi kaynakta olursa olsun — metin-etiketli bir veri kaynağı
-bulmak/toplamak (şu an PaddleOCR'ın hazır ağırlıklarıyla çalışıyor, bizim
-eğittiğimiz bir model değil).
+Aşama 1 tamamlandı. Aşama 2 fiilen tamamlandı: plaka dedektörü (640px'e
+yeniden eğitildi, mAP50 %79.1, recall %61.9→%75.4 — karar #22), marka/model
+sınıflandırıcı (val_top1 %28.3) ve plaka OCR'ı (ince ayarsız baseline,
+kolay sette tam eşleşme %97.6, zorlu sette %90) hem ayrı ayrı hem de
+`InferencePipeline` üzerinden uçtan uca gerçek görüntülerle doğrulandı —
+bu süreçte iki gerçek boru hattı hatası (crop padding, küçük kırpımlarda
+dedektör kaçırması) bulunup düzeltildi (karar #23). **Sıradaki adım:**
+Aşama 3 (gerçek Türk trafik verisiyle daha geniş ölçekli toplama/etiketleme)
+veya tam birleşik veri setiyle (5.413 görüntü, henüz denenmedi) 640px'te
+dedektör yeniden eğitimi — çözünürlük kazancının üstüne veri hacminin ek
+katkısı olup olmadığını görmek için.
+
+**Marka/model sınıflandırıcı — kapsam dışına alındı (karar #29):**
+VMMRdb kaynaklı ABD-pazarı önyargısı (karar #13) çözülmedi. Üç veri
+seti/yöntem denendi, üçü de rastgele-tahmin seviyesini geçemedi: Kaggle
+katalog seti (33 marka, stüdyo/render görüntüleri — karar #25, tam
+başarısızlık), VMMRdb'nin marka-seviyesine indirgenmiş hali (gerçek
+ikinci-el ilan fotoğrafları, kendi alanında iyi ama 6 held-out Türkiye
+fotoğrafında 0/6 — karar #26), ve elle etiketlenmiş 80 gerçek Türkiye
+fotoğrafı/18 marka (karar #27, 16 held-out'ta 1/16 ve 0/16). **Sonuç:
+üçünde de asıl darboğaz aynı — sınıf başına yetersiz görüntü sayısı,
+farklı bir mimari/veri kaynağı denemenin getirisi düşük.** Proje kapsamı
+bu nedenle marka/model'den **araç tipi (car/motorcycle/bus/truck,
+zaten güvenilir) + plaka**'ya kaydırıldı (karar #29); classifier kod
+olarak duruyor, `configs/pipeline.yaml`'da tek satırla geri açılabilir,
+ama artık varsayılan hedef değil. Etiketleme hacmi ileride büyürse
+(Claude-vision, karar #21) yeniden değerlendirilebilir.
+
+**Web arayüzü + video/kamera altyapısı — uçtan uca doğrulandı (karar
+#30-#38):** Fotoğraf/video/canlı kamera için FastAPI tabanlı bir web
+arayüzü yazıldı (`scripts/run_web.py`), gerçek sunucuda test edildi.
+Bu süreçte bulunup düzeltilen gerçek sorunlar: canlı kameranın event-loop
+bloklanması yüzünden donması (karar #30), PaddleOCR'ın CPU'da aşırı yavaş
+olması (medium→tiny model, ~13x hızlanma, karar #31), plaka dedektörünün
+açılı/uzak kameralarda düşük recall'ı (karar #28/#32 — kısmen çözüldü:
+`arac2.mp4` fiziksel bir çözünürlük tabanına takıldı, yazılımla
+çözülemez; `arac3.mp4` rotasyon hatası düzeltilince gerçek sinyal ortaya
+çıktı, karar #33/#34), video döndürme + saniye-bazlı örnekleme desteği
+(karar #34), kare-arası araç izleme + plaka/tip konsensüsü (karar #37 —
+tek kareye güvenmek yerine aynı aracın birden fazla karedeki okumasını
+çoğunluk oyuyla birleştiriyor, "23 ACM 638" gibi gürültülü tek-kare
+okumaları tek bir güvenilir sonuca indiriyor).
+
+**Plaka dedektörü ince ayarı denendi, geri alındı (karar #35/#38):** 19
+pseudo-label görüntüyle (`arac3.mp4`'ten) hafif ince ayar, hedeflenen
+held-out pencerede iyileşti ama tam videoda geçerli okunan araç sayısını
+2'den 1'e düşürdü — net kayıp, üretime alınmadı. Bu ölçekte (19 görüntü)
+self-training'in riskli olduğu, tam-video doğrulaması olmadan
+üretime alınmaması gerektiği kayıt altında. `models/plate_detector/best.pt`
+(karar #22) hâlâ üretimdeki checkpoint.

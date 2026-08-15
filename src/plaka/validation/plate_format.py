@@ -15,10 +15,13 @@ from dataclasses import dataclass
 ALLOWED_LETTERS = "ABCDEFGHIJKLMNOPRSTUVYZ"
 
 # (letter_count -> allowed digit_count set), per Turkish traffic regulation.
+# 3-letter groups allow both 2 and 3 digits (e.g. "66 AAP 914") — the
+# original 3: {2}-only table was disproven by real labeled plate photos
+# during the OCR pilot (see docs/decisions.md).
 VALID_GROUP_COMBINATIONS: dict[int, frozenset[int]] = {
     1: frozenset({4}),
     2: frozenset({3, 4}),
-    3: frozenset({2}),
+    3: frozenset({2, 3}),
 }
 
 _PLATE_PATTERN = re.compile(

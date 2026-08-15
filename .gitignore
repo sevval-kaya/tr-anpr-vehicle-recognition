@@ -45,6 +45,9 @@ outputs/*
 .DS_Store
 Thumbs.db
 
+# Claude Code local settings (machine-specific, not for sharing)
+.claude/settings.local.json
+
 # Type checking / test caches
 .mypy_cache/
 .pytest_cache/

@@ -15,6 +15,7 @@ def validator() -> TurkishPlateValidator:
         ("34a1234", "34 A 1234"),
         ("06 AB 123", "06 AB 123"),
         ("81 ABC 12", "81 ABC 12"),
+        ("66 AAP 914", "66 AAP 914"),
         ("  34   AB   1234  ", "34 AB 1234"),
     ],
 )
@@ -32,7 +33,7 @@ def test_valid_plates_are_normalized(
         ("00 A 1234", "il_kodu_out_of_range"),
         ("82 A 1234", "il_kodu_out_of_range"),
         ("34 ABCD 12", "format_mismatch"),
-        ("34 ABC 123", "invalid_group_combination"),
+        ("34 ABC 1234", "invalid_group_combination"),
         ("34 A 123", "invalid_group_combination"),
         ("34 AB 12", "invalid_group_combination"),
         ("34 QW 1234", "format_mismatch"),

@@ -3,8 +3,10 @@ from pathlib import Path
 import pytest
 
 from plaka.data.datasets import (
+    aggregate_images_by_brand,
     count_images_per_class,
     discover_class_names,
+    extract_brand,
     select_target_classes,
     write_class_names,
 )
@@ -110,3 +112,90 @@ class TestSelectTargetClasses:
         )
 
         assert selected == sorted(selected)
+
+
+class TestExtractBrand:
+    def test_simple_make_model_year(self) -> None:
+        assert extract_brand("renault_captur_2015") == "renault"
+
+    def test_space_separated_make_has_no_internal_underscore(self) -> None:
+        # "mercedes benz" contains a space, not an underscore, so splitting
+        # on the first "_" only correctly leaves it intact as one token.
+        assert extract_brand("mercedes benz_190_1985") == "mercedes benz"
+
+    def test_multi_word_model(self) -> None:
+        assert extract_brand("peugeot_407_wagon_2005") == "peugeot"
+
+    def test_no_underscore_returns_whole_string(self) -> None:
+        assert extract_brand("togg") == "togg"
+
+
+class TestAggregateImagesByBrand:
+    def test_pools_images_across_a_brands_raw_classes(self, tmp_path: Path) -> None:
+        _make_class(tmp_path, "toyota_corolla_2010", n_images=3)
+        _make_class(tmp_path, "toyota_camry_2012", n_images=2)
+
+        pools = aggregate_images_by_brand(
+            tmp_path, target_brands=["toyota"], max_images_per_brand=100
+        )
+
+        assert len(pools["toyota"]) == 5
+
+    def test_sparse_brand_with_one_raw_class_is_not_dropped(self, tmp_path: Path) -> None:
+        for i in range(10):
+            _make_class(tmp_path, f"ford_focus_{2000 + i}", n_images=50)
+        _make_class(tmp_path, "renault_captur_2015", n_images=3)
+
+        pools = aggregate_images_by_brand(
+            tmp_path, target_brands=["ford", "renault"], max_images_per_brand=100
+        )
+
+        assert len(pools["renault"]) == 3
+        assert len(pools["ford"]) == 100  # capped, would otherwise be 500
+
+    def test_brand_below_cap_keeps_everything(self, tmp_path: Path) -> None:
+        _make_class(tmp_path, "opel_astra_2007", n_images=8)
+
+        pools = aggregate_images_by_brand(
+            tmp_path, target_brands=["opel"], max_images_per_brand=300
+        )
+
+        assert len(pools["opel"]) == 8
+
+    def test_brand_not_in_dataset_is_omitted_not_an_error(self, tmp_path: Path) -> None:
+        _make_class(tmp_path, "toyota_corolla_2010", n_images=3)
+
+        pools = aggregate_images_by_brand(
+            tmp_path, target_brands=["toyota", "togg"], max_images_per_brand=100
+        )
+
+        assert "togg" not in pools
+        assert "toyota" in pools
+
+    def test_brands_outside_target_list_are_ignored(self, tmp_path: Path) -> None:
+        _make_class(tmp_path, "acura_cl_1997", n_images=5)
+        _make_class(tmp_path, "toyota_corolla_2010", n_images=3)
+
+        pools = aggregate_images_by_brand(
+            tmp_path, target_brands=["toyota"], max_images_per_brand=100
+        )
+
+        assert set(pools) == {"toyota"}
+
+    def test_deterministic_given_seed(self, tmp_path: Path) -> None:
+        _make_class(tmp_path, "toyota_corolla_2010", n_images=50)
+
+        first = aggregate_images_by_brand(
+            tmp_path, target_brands=["toyota"], max_images_per_brand=10, seed=7
+        )
+        second = aggregate_images_by_brand(
+            tmp_path, target_brands=["toyota"], max_images_per_brand=10, seed=7
+        )
+
+        assert first["toyota"] == second["toyota"]
+
+    def test_missing_dataset_root_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            aggregate_images_by_brand(
+                tmp_path / "nope", target_brands=["toyota"], max_images_per_brand=100
+            )
