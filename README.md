@@ -36,6 +36,10 @@ pip install -e ".[detection]"       # ultralytics
 pip install -e ".[ocr]"             # paddleocr
 pip install -e ".[classification]"  # torch, timm (devre dışı özellik için altyapı)
 pip install -e ".[serving]"         # web arayüzü (fastapi, uvicorn)
+
+# Plaka dedektörü checkpoint'i (models/plate_detector/best.pt) git'e
+# dahil değil — GitHub Release'den indir (bkz. docs/decisions.md #44):
+python scripts/download_weights.py
 ```
 
 ## Kullanım
@@ -105,3 +109,11 @@ Yol haritası ve ilerleme durumu: `docs/roadmap.md`
 Plaka tespiti + OCR + araç tipi tespiti uçtan uca çalışıyor (foto, video,
 web arayüzü dahil). Devam eden çalışma: plaka dedektörünün açılı/uzak
 kameralardaki recall'ünü iyileştirmek — detaylar `docs/roadmap.md`'de.
+
+## Lisans
+
+`pyproject.toml` şu an `Proprietary` olarak işaretli. Bu netleştirilmeyi
+bekliyor — hem kod lisansı hem de `models/plate_detector/best.pt`
+checkpoint'inin eğitildiği verilerden birinin (`data/external/user_plates/`,
+bkz. `data/README.md`) kaynağı/lisansı belirsiz olduğu için, harici
+paylaşım/yayın öncesi ayrıca teyit gerekiyor.
