@@ -2024,3 +2024,39 @@ Kullanıcı kurup authenticate ettikten sonra `git tag v0.1.0` +
 — bu, gerçek dünyaya görünür bir yayın işlemi olduğu için (git push gibi)
 kullanıcının kendi terminalinden çalıştırması isteniyor, otomatik
 yapılmadı.
+
+## 47. Release `v0.1.0` gerçekten yayınlandı — Aşama 1 ve 2'nin bekleyen doğrulaması tamamlandı
+
+**Durum:** Kullanıcı `gh` CLI'yi kurup authenticate oldu, `git tag v0.1.0`
++ `gh release create v0.1.0 models/plate_detector/best.pt` komutlarını
+kendi terminalinden çalıştırdı (bir ara `git push origin v0.1.0`
+gerekti — tag yerelde oluşturulmuştu ama uzak repoya push edilmemişti,
+`gh release create` bunu net bir hatayla bildirdi). Release canlı:
+https://github.com/sevval-kaya/tr-anpr-vehicle-recognition/releases/tag/v0.1.0
+
+**`scripts/download_weights.py` gerçek release'e karşı uçtan uca
+doğrulandı** (karar #44'te sadece mock'lanmış testlerle doğrulanmıştı):
+varsayılan `--repo`/`--tag`/`--asset-name` ile gerçek indirme yapıldı,
+ilerleme çubuğu çalıştı, indirilen dosyanın SHA256'sı yereldeki orijinal
+checkpoint'le **birebir eşleşti** (`5a7cdddc...`) — hem `gh release
+view`'ın gösterdiği digest'le hem de doğrudan hesaplanan checksum'la.
+
+**`docker compose build` tam olarak, sonuna kadar tamamlandı** (karar
+#45'te sadece `--target builder` ile kısmi doğrulanmıştı) — bu
+ortamdaki yavaş ağ yüzünden ~65 dakika sürdü (gerçek Dockerfile/ağ
+sorunundan değil), ama sıfır hatayla bitti. Runtime aşamasındaki
+`RUN python scripts/download_weights.py` adımı container **içinden**
+gerçek release'e bağlanıp checkpoint'i 9.6 saniyede indirdi.
+
+**`docker compose up` ile tam uçtan uca doğrulama:** Container ayağa
+kalktı, `pipeline ready` logu göründü (checkpoint gerçekten yüklendi),
+`http://localhost:8000` 200 OK döndü, ve `curl` ile gerçek bir fotoğraf
+(`data/external/test_foto/foto.jpeg`) `/api/infer/image`'a gönderilip
+**doğru sonuç alındı**: 2 araç, ikisi de geçerli Türk plakasıyla
+("23 FE 251", "23 AFS 937") — yani container içindeki checkpoint
+gerçekten çalışıyor, sadece build'in başarılı olması değil. Doğrulama
+sonrası `docker compose down` ile temizlendi.
+
+**Sonuç: Aşama 1 ve 2 artık tamamen ve gerçek dünyada doğrulanmış
+durumda** — mock/kısmi test değil, gerçek release + gerçek Docker
+build + gerçek çıkarım.
