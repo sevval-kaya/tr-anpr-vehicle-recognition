@@ -1,5 +1,31 @@
 # Türk Plaka Tanıma Sistemi (ANPR) + Araç Tipi Tespiti
 
+## Hızlı Başlangıç
+
+**Docker ile:**
+```bash
+docker compose up --build
+```
+Ardından tarayıcıda `http://localhost:8000` adresini açın.
+
+**Yerel kurulum ile (macOS/Linux):**
+```bash
+./setup.sh
+```
+
+**Yerel kurulum ile (Windows PowerShell):**
+```powershell
+# Script engellenirse önce (yönetici gerekmez):
+# Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\setup.ps1
+```
+
+İkisi de bittiğinde: `python scripts/run_web.py` ile web arayüzünü
+başlatın. Detaylı/manuel kurulum adımları ve tüm CLI komutları için
+aşağıdaki bölümlere bakın.
+
+---
+
 Türk trafiğinde araç plakalarını okuyan (yalnızca Türk formatına özel)
 ve aynı görüntüden araç tipini (otomobil/motosiklet/otobüs/kamyon)
 tespit eden bir bilgisayarlı görü sistemi. Fotoğraf, video dosyası ve
