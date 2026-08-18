@@ -1,0 +1,37 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Git / IDE / Claude Code
+.git/
+.github/
+.vscode/
+.idea/
+.claude/
+
+# Data / models / outputs — never baked into the image via COPY; the
+# checkpoint is fetched by scripts/download_weights.py during the build
+# instead (see Dockerfile), so a locally-present models/ would silently
+# defeat that and copying data/ would bloat the build context for no
+# reason (it's gitignored locally-only content, often multi-GB).
+data/
+models/
+outputs/
+runs/
+wandb/
+mlruns/
+notebooks/
+
+# Test / type-check / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.log
