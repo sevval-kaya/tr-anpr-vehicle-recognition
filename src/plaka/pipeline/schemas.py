@@ -116,6 +116,13 @@ class VehicleDetection(BaseModel):
         default=None,
         description="Stable ID across frames, set once temporal voting is wired in.",
     )
+    estimated_speed_kmh: float | None = Field(
+        default=None,
+        description="Uncalibrated, self-referenced-scale speed estimate (docs/decisions.md "
+        "#42) — set only for tracked vehicles in video/camera mode with at least two "
+        "position observations (plaka.pipeline.tracker.apply_consensus). Always None for "
+        "single-frame photo results: one frame carries no motion information.",
+    )
 
 
 class FrameResult(BaseModel):

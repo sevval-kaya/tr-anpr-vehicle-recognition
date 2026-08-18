@@ -207,6 +207,68 @@ class TestVehicleTypeConsensus:
         assert updated2.vehicles[0].vehicle_type == "car"
 
 
+class TestSpeedEstimation:
+    def test_position_history_accumulates_across_updates(self) -> None:
+        tracker = VehicleTracker()
+        box0 = BoundingBox(x_min=0, y_min=0, x_max=100, y_max=50)
+        box1 = BoundingBox(x_min=10, y_min=0, x_max=110, y_max=50)
+        track_id = tracker.update(0, [_vehicle(box0)], timestamp_seconds=0.0)[0]
+        tracker.update(1, [_vehicle(box1)], timestamp_seconds=1.0)
+        track = tracker.get_track(track_id)
+        assert track is not None
+        assert len(track.position_history) == 2
+
+    def test_estimated_speed_kmh_is_none_with_a_single_observation(self) -> None:
+        tracker = VehicleTracker()
+        box = BoundingBox(x_min=0, y_min=0, x_max=100, y_max=50)
+        track_id = tracker.update(0, [_vehicle(box)], timestamp_seconds=0.0)[0]
+        assert tracker.get_track(track_id).estimated_speed_kmh is None
+
+    def test_estimated_speed_kmh_is_a_plausible_positive_number_for_a_moving_vehicle(self) -> None:
+        tracker = VehicleTracker()
+        # Box shifts 10px right per second, constant 100px width -> a real,
+        # small but nonzero speed, never 0-200 km/h-implausible.
+        track_id = None
+        for i in range(5):
+            box = BoundingBox(x_min=i * 10, y_min=0, x_max=i * 10 + 100, y_max=50)
+            ids = tracker.update(i, [_vehicle(box)], timestamp_seconds=float(i))
+            track_id = ids[0]
+        speed = tracker.get_track(track_id).estimated_speed_kmh
+        assert speed is not None
+        assert 0 < speed < 200
+
+    def test_stationary_vehicle_estimates_near_zero_speed(self) -> None:
+        tracker = VehicleTracker()
+        box = BoundingBox(x_min=0, y_min=0, x_max=100, y_max=50)
+        track_id = None
+        for i in range(4):
+            ids = tracker.update(i, [_vehicle(box)], timestamp_seconds=float(i))
+            track_id = ids[0]
+        assert tracker.get_track(track_id).estimated_speed_kmh == 0.0
+
+    def test_apply_consensus_sets_estimated_speed_kmh(self) -> None:
+        tracker = VehicleTracker()
+        box0 = BoundingBox(x_min=0, y_min=0, x_max=100, y_max=50)
+        box1 = BoundingBox(x_min=50, y_min=0, x_max=150, y_max=50)
+        result0 = FrameResult(frame_index=0, vehicles=[_vehicle(box0)])
+        apply_consensus(result0, tracker, 0, timestamp_seconds=0.0)
+        result1 = FrameResult(frame_index=1, vehicles=[_vehicle(box1)])
+        updated1 = apply_consensus(result1, tracker, 1, timestamp_seconds=1.0)
+        assert updated1.vehicles[0].estimated_speed_kmh is not None
+        assert updated1.vehicles[0].estimated_speed_kmh > 0
+
+    def test_omitting_timestamp_seconds_does_not_crash(self) -> None:
+        # Callers that don't pass timestamp_seconds (most existing tests)
+        # must keep working — frame_index is used as a time-base fallback.
+        tracker = VehicleTracker()
+        box = BoundingBox(x_min=0, y_min=0, x_max=100, y_max=50)
+        tracker.update(0, [_vehicle(box)])
+        track_id = tracker.update(1, [_vehicle(box)])[0]
+        # No assertion on the numeric value (the fallback time base is
+        # meaningless) — just that it doesn't raise.
+        _ = tracker.get_track(track_id).estimated_speed_kmh
+
+
 class TestApplyConsensus:
     def test_replaces_plate_text_once_a_track_has_a_reading(self) -> None:
         tracker = VehicleTracker()

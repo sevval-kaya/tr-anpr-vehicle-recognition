@@ -223,13 +223,21 @@ def _process_and_annotate(
     plan: FrameSamplingPlan,
     last_result: FrameResult | None,
     latency: LatencyTracker,
+    timestamp_seconds_value: float,
+    speed_limit_kmh: float,
 ) -> tuple[FrameResult | None, NDArray[np.uint8]]:
     if plan.should_process(frame_index):
         raw_result = pipeline.process_frame(frame, frame_index=frame_index)
         latency.mark()
-        last_result = apply_consensus(raw_result, tracker, frame_index)
+        last_result = apply_consensus(
+            raw_result, tracker, frame_index, timestamp_seconds=timestamp_seconds_value
+        )
         _log_summary(frame_index, fps, last_result)
-    annotated = annotate_frame(frame, last_result) if last_result is not None else frame
+    annotated = (
+        annotate_frame(frame, last_result, speed_limit_kmh=speed_limit_kmh)
+        if last_result is not None
+        else frame
+    )
     return last_result, annotated
 
 
@@ -240,6 +248,7 @@ def _run_sequential(
     display: bool,
     plan: FrameSamplingPlan,
     max_frames: int | None,
+    speed_limit_kmh: float,
 ) -> LatencyTracker:
     latency = LatencyTracker("sequential")
     fps = capture.get(cv2.CAP_PROP_FPS) or 25.0
@@ -256,8 +265,13 @@ def _run_sequential(
             break
         frame = plan.prepare(frame)
 
+        # A video file's frame_index/fps ratio is a reliable time base
+        # (unlike live camera — see _run_threaded below and
+        # docs/decisions.md #42).
         last_result, annotated = _process_and_annotate(
-            pipeline, tracker, frame, frame_index, fps, plan, last_result, latency
+            pipeline, tracker, frame, frame_index, fps, plan, last_result, latency,
+            timestamp_seconds_value=timestamp_seconds(frame_index, fps),
+            speed_limit_kmh=speed_limit_kmh,
         )
 
         if writer is not None:
@@ -285,6 +299,7 @@ def _run_threaded(
     display: bool,
     plan: FrameSamplingPlan,
     max_frames: int | None,
+    speed_limit_kmh: float,
 ) -> LatencyTracker:
     latency = LatencyTracker("threaded")
     fps = capture.get(cv2.CAP_PROP_FPS) or 25.0
@@ -328,9 +343,15 @@ def _run_threaded(
 
             # Rotation is already applied inside the grabber thread (it has
             # to be, so ThreadedFrameGrabber's own frame buffer stays
-            # consistent regardless of who reads it next).
+            # consistent regardless of who reads it next). Real wall-clock
+            # time, not frame_index/fps: a live camera's actual frame
+            # interval isn't constant (grabber skips frames the pipeline
+            # can't keep up with — see ThreadedFrameGrabber docstring and
+            # docs/decisions.md #42), so fps would be the wrong time base.
             last_result, annotated = _process_and_annotate(
-                pipeline, tracker, frame, frame_index, fps, plan, last_result, latency
+                pipeline, tracker, frame, frame_index, fps, plan, last_result, latency,
+                timestamp_seconds_value=time.monotonic(),
+                speed_limit_kmh=speed_limit_kmh,
             )
             last_annotated = annotated
 
@@ -381,6 +402,7 @@ def run(
     rotate_degrees: int,
     max_frames: int | None,
     no_threaded: bool,
+    speed_limit_kmh: float,
 ) -> None:
     capture = _open_capture(source)
     if not capture.isOpened():
@@ -420,9 +442,13 @@ def run(
 
     try:
         if use_threaded:
-            latency = _run_threaded(capture, pipeline, writer, display, plan, max_frames)
+            latency = _run_threaded(
+                capture, pipeline, writer, display, plan, max_frames, speed_limit_kmh
+            )
         else:
-            latency = _run_sequential(capture, pipeline, writer, display, plan, max_frames)
+            latency = _run_sequential(
+                capture, pipeline, writer, display, plan, max_frames, speed_limit_kmh
+            )
     finally:
         capture.release()
         if writer is not None:
@@ -471,10 +497,20 @@ def main() -> None:
         "source's fps (frame_stride = round(fps * N)). Overrides --frame-stride.",
     )
     parser.add_argument("--max-frames", type=int, default=None, help="Stop after N frames")
+    parser.add_argument(
+        "--speed-limit-kmh",
+        type=float,
+        default=50.0,
+        help="Uncalibrated speed estimate above this (km/h) is drawn in red below the "
+        "vehicle box instead of white (docs/decisions.md #42). Default matches the web "
+        "app's default (configs/pipeline.yaml speed.default_speed_limit_kmh).",
+    )
     args = parser.parse_args()
 
     if args.frame_stride < 1:
         parser.error("--frame-stride must be >= 1")
+    if args.speed_limit_kmh <= 0:
+        parser.error("--speed-limit-kmh must be > 0")
     if args.sample_interval_seconds is not None and args.sample_interval_seconds <= 0:
         parser.error("--sample-interval-seconds must be > 0")
 
@@ -488,6 +524,7 @@ def main() -> None:
         rotate_degrees=args.rotate,
         max_frames=args.max_frames,
         no_threaded=args.no_threaded,
+        speed_limit_kmh=args.speed_limit_kmh,
     )
 
 

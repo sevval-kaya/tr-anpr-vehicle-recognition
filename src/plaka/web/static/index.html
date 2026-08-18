@@ -120,6 +120,15 @@
             </select>
             <span class="option-hint" id="sample-interval-hint"></span>
           </label>
+          <label class="option-field">
+            <span>Hız sınırı (km/h)</span>
+            <input type="number" id="video-speed-limit" min="1" step="1" value="50" />
+            <span class="option-hint">
+              <i data-lucide="info"></i>
+              <span>Kalibrasyon yapılmadı — hız kabaca bir tahmindir, gerçek hızdan
+                önemli ölçüde sapabilir. Bu sınırı aşan araçlar kırmızıyla işaretlenir.</span>
+            </span>
+          </label>
         </div>
         <button class="btn primary" id="video-submit" disabled>
           <i data-lucide="upload"></i> Yükle ve İşle
@@ -159,8 +168,17 @@
           <button class="btn secondary hidden" id="camera-stop">
             <i data-lucide="square"></i> Durdur
           </button>
+          <label class="option-field camera-speed-field">
+            <span>Hız sınırı (km/h)</span>
+            <input type="number" id="camera-speed-limit" min="1" step="1" value="50" />
+          </label>
           <span class="status-line" id="camera-status"></span>
         </div>
+        <span class="option-hint">
+          <i data-lucide="info"></i>
+          <span>Kalibrasyon yapılmadı — gösterilen hız kabaca bir tahmindir, gerçek
+            hızdan önemli ölçüde sapabilir. Sınır akış sırasında da değiştirilebilir.</span>
+        </span>
         <div class="camera-view">
           <video id="camera-raw" autoplay playsinline muted hidden></video>
           <img id="camera-annotated" alt="Canlı analiz" hidden />
@@ -169,7 +187,7 @@
           </div>
         </div>
         <table class="results-table" id="camera-results-table">
-          <thead><tr><th>Tip</th><th>Plaka</th><th>Güven</th></tr></thead>
+          <thead><tr><th>Tip</th><th>Plaka</th><th>Güven</th><th>Hız</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>

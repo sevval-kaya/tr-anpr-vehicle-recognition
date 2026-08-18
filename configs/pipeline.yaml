@@ -19,5 +19,12 @@ matching:
   # to be associated (see plaka.pipeline.inference_pipeline.MIN_PLATE_CONTAINMENT_RATIO).
   min_plate_containment_ratio: 0.5
 
+speed:
+  # Uncalibrated, self-referenced-scale speed estimate (video/camera modes
+  # only — see plaka.pipeline.speed and docs/decisions.md #42). This is
+  # only the value the web UI pre-fills; always overridable per upload/
+  # camera session, never enforced server-side.
+  default_speed_limit_kmh: 50.0
+
 logging:
   level: "INFO"

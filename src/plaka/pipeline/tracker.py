@@ -33,10 +33,11 @@ the user either.
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, field
 
 from plaka.pipeline.schemas import BoundingBox, FrameResult, VehicleDetection
+from plaka.pipeline.speed import BoxPositionObservation, estimate_speed_kmh
 
 # Below this IoU, a detection in the new frame is treated as a different
 # vehicle rather than a continuation of an existing track.
@@ -53,6 +54,11 @@ DEFAULT_INTRA_FRAME_DUPLICATE_IOU = 0.7
 # "the next processed frame" can be many raw frames later, and a vehicle
 # can be missed for a frame or two without actually being a different one).
 DEFAULT_MAX_FRAMES_SINCE_SEEN = 15
+
+# Bounds a track's position_history so a long-lived track doesn't grow this
+# list forever — speed estimation only ever looks at the most recent
+# speed.SPEED_WINDOW_OBSERVATIONS+1 entries anyway (see VehicleTrack.estimated_speed_kmh).
+POSITION_HISTORY_MAXLEN = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,12 +100,38 @@ class VehicleTrack:
     last_frame_index: int
     plate_observations: list[PlateObservation] = field(default_factory=list)
     type_observations: list[TypeObservation] = field(default_factory=list)
+    position_history: deque[BoxPositionObservation] = field(
+        default_factory=lambda: deque(maxlen=POSITION_HISTORY_MAXLEN)
+    )
 
     def add_plate_observation(self, frame_index: int, normalized_text: str, ocr_confidence: float) -> None:
         self.plate_observations.append(PlateObservation(frame_index, normalized_text, ocr_confidence))
 
     def add_type_observation(self, vehicle_type: str, detection_confidence: float) -> None:
         self.type_observations.append(TypeObservation(vehicle_type, detection_confidence))
+
+    def add_position_observation(self, timestamp_seconds: float, box: BoundingBox) -> None:
+        """Records one frame's ground-contact point (box bottom-center) and
+        box width — the raw material for estimated_speed_kmh below. One
+        call per frame per track (see VehicleTracker.update), regardless of
+        how many duplicate detections that frame's cluster contained.
+        """
+        self.position_history.append(
+            BoxPositionObservation(
+                timestamp_seconds=timestamp_seconds,
+                bottom_center_x=(box.x_min + box.x_max) / 2,
+                bottom_center_y=box.y_max,
+                box_width_px=box.width,
+            )
+        )
+
+    @property
+    def estimated_speed_kmh(self) -> float | None:
+        """Uncalibrated speed estimate from position_history — see
+        plaka.pipeline.speed module docstring and docs/decisions.md #42.
+        None until at least two position observations exist.
+        """
+        return estimate_speed_kmh(self.position_history, self.consensus_vehicle_type)
 
     @property
     def consensus_text(self) -> str | None:
@@ -180,7 +212,12 @@ class VehicleTracker:
         self._tracks: dict[int, VehicleTrack] = {}
         self._next_track_id = 1
 
-    def update(self, frame_index: int, vehicles: list[VehicleDetection]) -> list[int]:
+    def update(
+        self,
+        frame_index: int,
+        vehicles: list[VehicleDetection],
+        timestamp_seconds: float | None = None,
+    ) -> list[int]:
         """Match this frame's `vehicles` (in order) against active tracks
         by IoU alone (never by vehicle_type — see module docstring) —
         each *cluster* of mutual-duplicate detections matches at most the
@@ -188,11 +225,23 @@ class VehicleTracker:
         clusters start new tracks. Records a plate observation (when the
         vehicle has a valid-format reading) and a type observation (always)
         on the matched/new track for every vehicle in the cluster, not
-        just its representative.
+        just its representative; records one position observation per
+        track (the cluster representative's box) for speed estimation.
+
+        `timestamp_seconds` should be real elapsed time — frame_index/fps
+        for a video file, wall-clock time for live camera frames (frame
+        intervals there aren't constant, see plaka.pipeline.speed and
+        docs/decisions.md #42). Defaults to `float(frame_index)` when
+        omitted, which is wrong as a time base but harmless for callers
+        that don't care about position_history/estimated_speed_kmh (most
+        existing tests).
 
         Returns one track_id per vehicle, same order as `vehicles` — every
         vehicle in a duplicate cluster gets the same track_id.
         """
+        effective_timestamp = (
+            float(frame_index) if timestamp_seconds is None else timestamp_seconds
+        )
         stale_ids = [
             track_id
             for track_id, track in self._tracks.items()
@@ -242,6 +291,7 @@ class VehicleTracker:
                 track.last_frame_index = frame_index
 
             track = self._tracks[track_id]
+            track.add_position_observation(effective_timestamp, rep.box)
             for vehicle_index in cluster:
                 vehicle = vehicles[vehicle_index]
                 track.add_type_observation(vehicle.vehicle_type, vehicle.detection_confidence)
@@ -256,27 +306,39 @@ class VehicleTracker:
         return self._tracks.get(track_id)
 
 
-def apply_consensus(result: FrameResult, tracker: VehicleTracker, frame_index: int) -> FrameResult:
+def apply_consensus(
+    result: FrameResult,
+    tracker: VehicleTracker,
+    frame_index: int,
+    timestamp_seconds: float | None = None,
+) -> FrameResult:
     """Runs `tracker.update()` for this frame and returns a new FrameResult
     where each vehicle's `track_id` is set, its `vehicle_type` is replaced
-    by its track's cross-frame consensus type, and — once its track has
-    seen at least one valid-format reading — its plate's `normalized_text`
-    is replaced by the track's consensus text. Box/confidence values are
-    left untouched.
+    by its track's cross-frame consensus type, its `estimated_speed_kmh`
+    is set from the track's position history (docs/decisions.md #42), and
+    — once its track has seen at least one valid-format reading — its
+    plate's `normalized_text` is replaced by the track's consensus text.
+    Box/confidence values are left untouched.
     """
-    track_ids = tracker.update(frame_index, result.vehicles)
+    track_ids = tracker.update(frame_index, result.vehicles, timestamp_seconds=timestamp_seconds)
     updated_vehicles = []
     for vehicle, track_id in zip(result.vehicles, track_ids, strict=True):
         track = tracker.get_track(track_id)
         consensus_text = track.consensus_text if track is not None else None
         consensus_type = track.consensus_vehicle_type if track is not None else vehicle.vehicle_type
+        estimated_speed_kmh = track.estimated_speed_kmh if track is not None else None
         if vehicle.plate is not None and consensus_text is not None:
             updated_plate = vehicle.plate.model_copy(update={"normalized_text": consensus_text})
         else:
             updated_plate = vehicle.plate
         updated_vehicles.append(
             vehicle.model_copy(
-                update={"plate": updated_plate, "track_id": track_id, "vehicle_type": consensus_type}
+                update={
+                    "plate": updated_plate,
+                    "track_id": track_id,
+                    "vehicle_type": consensus_type,
+                    "estimated_speed_kmh": estimated_speed_kmh,
+                }
             )
         )
     return result.model_copy(update={"vehicles": updated_vehicles})

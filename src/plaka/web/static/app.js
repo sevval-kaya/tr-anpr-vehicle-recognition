@@ -42,20 +42,47 @@ function vehicleTypeCellHtml(type) {
   return `<span class="vehicle-type-cell"><i data-lucide="${info.icon}"></i>${info.label}</span>`;
 }
 
-function renderVehicleRows(tbody, vehicles) {
+// Deliberately imprecise — counterbalances the false precision a bare
+// km/h number implies (see docs/decisions.md #42). Thresholds are
+// arbitrary round numbers, mirroring plaka.pipeline.speed.relative_speed_label.
+function relativeSpeedLabel(kmh) {
+  if (kmh < 15) return "yavaş";
+  if (kmh <= 60) return "normal";
+  return "hızlı";
+}
+
+// Uncalibrated speed estimate (docs/decisions.md #42) — always prefixed
+// with "~" (no precision claim), paired with the coarse relative label,
+// and given the "exceeded" styling only when the backend already computed
+// speed_limit_exceeded against the currently configured limit.
+function speedCellHtml(v) {
+  if (v.estimated_speed_kmh === null || v.estimated_speed_kmh === undefined) {
+    return '<span class="muted">—</span>';
+  }
+  const pillClass = v.speed_limit_exceeded ? "speed-pill exceeded" : "speed-pill";
+  return (
+    `<span class="${pillClass}">~${Math.round(v.estimated_speed_kmh)} km/h</span>` +
+    `<span class="speed-relative-tag">${relativeSpeedLabel(v.estimated_speed_kmh)}</span>`
+  );
+}
+
+function renderVehicleRows(tbody, vehicles, { showSpeed = false } = {}) {
   tbody.innerHTML = "";
+  const colspan = showSpeed ? 4 : 3;
   if (!vehicles.length) {
-    tbody.innerHTML = '<tr><td colspan="3" class="muted">Araç tespit edilmedi</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="${colspan}" class="muted">Araç tespit edilmedi</td></tr>`;
     refreshIcons();
     return;
   }
   for (const v of vehicles) {
     const tr = document.createElement("tr");
+    if (showSpeed && v.speed_limit_exceeded) tr.classList.add("exceeded");
     const plateCell = v.plate_text
       ? `<span class="plate-pill ${v.plate_valid ? "" : "invalid"}">${v.plate_text}</span>`
       : '<span class="muted">—</span>';
     tr.innerHTML = `<td>${vehicleTypeCellHtml(v.vehicle_type)}</td><td>${plateCell}</td>` +
-      `<td>${Math.round(v.detection_confidence * 100)}%</td>`;
+      `<td>${Math.round(v.detection_confidence * 100)}%</td>` +
+      (showSpeed ? `<td>${speedCellHtml(v)}</td>` : "");
     tbody.appendChild(tr);
   }
   refreshIcons();
@@ -261,6 +288,8 @@ document.getElementById("video-submit").addEventListener("click", async () => {
     formData.append("rotate", String(selectedRotation));
     const sampleInterval = document.getElementById("video-sample-interval").value;
     if (sampleInterval) formData.append("sample_interval_seconds", sampleInterval);
+    const speedLimit = document.getElementById("video-speed-limit").value;
+    if (speedLimit) formData.append("speed_limit_kmh", speedLimit);
     const res = await fetch("/api/infer/video", { method: "POST", body: formData });
     if (!res.ok) throw new Error(`sunucu hatası (${res.status})`);
     const { job_id } = await res.json();
@@ -355,6 +384,7 @@ function showVideoResult(job) {
   for (const sighting of ordered) {
     const item = document.createElement("div");
     item.className = "plate-gallery-item";
+    if (sighting.speed_limit_exceeded) item.classList.add("exceeded");
     let plateRowHtml;
     if (sighting.plate_status === "read") {
       plateRowHtml = `<span class="plate-pill">${sighting.plate_text}</span>`;
@@ -368,6 +398,10 @@ function showVideoResult(job) {
       }
     }
     const typeInfo = VEHICLE_TYPE_INFO[sighting.vehicle_type] || { label: sighting.vehicle_type, icon: "help-circle" };
+    const speedRowHtml = speedCellHtml(sighting);
+    const exceededBadge = sighting.speed_limit_exceeded
+      ? '<span class="limit-exceeded-badge"><i data-lucide="alert-triangle"></i>HIZ SINIRI AŞILDI</span>'
+      : "";
     item.innerHTML = `
       <img src="${sighting.thumbnail_url}" alt="${sighting.plate_text || typeInfo.label}" />
       <div class="plate-gallery-caption">
@@ -376,6 +410,8 @@ function showVideoResult(job) {
           <i data-lucide="${typeInfo.icon}"></i>${typeInfo.label}
           <i data-lucide="clock"></i>${sighting.timestamp_seconds.toFixed(1)}s
         </span>
+        <div class="plate-gallery-plate-row">${speedRowHtml}</div>
+        ${exceededBadge}
       </div>`;
     gallery.appendChild(item);
   }
@@ -391,6 +427,18 @@ let lastAnnotatedUrl = null;
 document.getElementById("camera-start").addEventListener("click", startCamera);
 document.getElementById("camera-stop").addEventListener("click", stopCamera);
 
+// Mid-stream limit change (no reconnect) — the value at connect time seeds
+// the session (see startCamera's ?speed_limit_kmh=), this keeps it in sync
+// afterward via a JSON control message the server also accepts as a frame
+// alternative (see plaka.web.app camera_feed, docs/decisions.md #42).
+document.getElementById("camera-speed-limit").addEventListener("change", (e) => {
+  const value = Number(e.target.value);
+  if (!Number.isFinite(value) || value <= 0) return;
+  if (cameraSocket && cameraSocket.readyState === WebSocket.OPEN) {
+    cameraSocket.send(JSON.stringify({ type: "set_speed_limit", value }));
+  }
+});
+
 async function startCamera() {
   const statusEl = document.getElementById("camera-status");
   try {
@@ -405,7 +453,10 @@ async function startCamera() {
   await rawVideo.play();
 
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  cameraSocket = new WebSocket(`${proto}://${window.location.host}/ws/camera`);
+  const speedLimit = document.getElementById("camera-speed-limit").value || "50";
+  cameraSocket = new WebSocket(
+    `${proto}://${window.location.host}/ws/camera?speed_limit_kmh=${encodeURIComponent(speedLimit)}`
+  );
   cameraSocket.binaryType = "blob";
 
   cameraSocket.onopen = () => {
@@ -421,7 +472,9 @@ async function startCamera() {
   cameraSocket.onmessage = (event) => {
     if (typeof event.data === "string") {
       const payload = JSON.parse(event.data);
-      renderVehicleRows(document.querySelector("#camera-results-table tbody"), payload.vehicles);
+      renderVehicleRows(document.querySelector("#camera-results-table tbody"), payload.vehicles, {
+        showSpeed: true,
+      });
       return;
     }
     const url = URL.createObjectURL(event.data);

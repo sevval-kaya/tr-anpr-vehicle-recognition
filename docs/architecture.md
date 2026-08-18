@@ -14,7 +14,7 @@ deviates from or extends it.
 | 4. Ön işleme | `plaka.ocr.preprocessing.enhance_plate_crop` | Implemented: CLAHE contrast only (see decisions.md for why perspective correction is deferred) |
 | 4. OCR | `plaka.ocr.plate_ocr.PlateOcr` | Implemented, wraps PaddleOCR, restricted to plate charset |
 | 5. Format doğrulama | `plaka.validation.plate_format.TurkishPlateValidator` | Implemented and tested, no model dependency |
-| 3a. Marka/model | `plaka.classification.vehicle_classifier.VehicleClassifier` | Implemented, wraps a timm backbone, **requires a trained checkpoint** |
+| 3a. Marka/model | `plaka.classification.vehicle_classifier.VehicleClassifier` | Code kept but **disabled by default** (`configs/pipeline.yaml` → `classification.enabled: false`) — dropped from scope in decision #29 after repeated below-random-guess accuracy on real data; one-line re-enable if enough labeled data is collected later |
 | 6. Zamansal oylama | *(not yet built)* | Deferred — needs a tracker (e.g. ByteTrack) + video data; roadmap stage 3+ |
 | 1-7 orchestration | `plaka.pipeline.inference_pipeline.InferencePipeline` | Implemented for single frames; plate↔vehicle association via `BoundingBox.containment_ratio` (see decisions.md) |
 | 7. Çıktı şeması | `plaka.pipeline.schemas` | Implemented (pydantic models: `FrameResult`, `VehicleDetection`, `PlateReading`, `MakeModelPrediction`) |

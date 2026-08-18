@@ -31,6 +31,7 @@ import cv2
 
 from plaka.pipeline.inference_pipeline import InferencePipeline
 from plaka.pipeline.schemas import FrameResult
+from plaka.pipeline.speed import exceeds_speed_limit
 from plaka.pipeline.tracker import VehicleTracker, apply_consensus
 from plaka.pipeline.video_io import FrameSamplingPlan, rotates_dimensions, timestamp_seconds
 from plaka.pipeline.visualization import annotate_frame
@@ -40,6 +41,10 @@ logger = get_logger(__name__)
 
 JobStatus = Literal["queued", "processing", "done", "error"]
 PlateStatus = Literal["read", "unreadable", "no_plate"]
+
+# City-street ballpark default (docs/decisions.md #42) — always overridable
+# per request/job, this is only the value pre-filled in the UI.
+DEFAULT_SPEED_LIMIT_KMH = 50.0
 
 # Cap on how many distinct *vehicles* (tracks) a job keeps a card for —
 # every tracked vehicle counts now, not just the ones with a successful
@@ -60,6 +65,8 @@ class VehicleSighting:
     raw_ocr_text: str | None
     observation_count: int
     thumbnail_url: str
+    estimated_speed_kmh: float | None
+    speed_limit_exceeded: bool
 
 
 def _dedupe_sightings(track_sightings: dict[int, VehicleSighting]) -> list[VehicleSighting]:
@@ -98,6 +105,7 @@ class VideoJob:
     output_dir: Path
     rotate_degrees: int = 0
     sample_interval_seconds: float | None = None
+    speed_limit_kmh: float = DEFAULT_SPEED_LIMIT_KMH
     status: JobStatus = "queued"
     frames_processed: int = 0
     total_frames: int = 0
@@ -146,6 +154,7 @@ class JobManager:
         original_filename: str,
         rotate_degrees: int = 0,
         sample_interval_seconds: float | None = None,
+        speed_limit_kmh: float = DEFAULT_SPEED_LIMIT_KMH,
     ) -> str:
         job_id = uuid.uuid4().hex
         output_dir = self._jobs_root / job_id
@@ -161,6 +170,7 @@ class JobManager:
             output_dir=output_dir,
             rotate_degrees=rotate_degrees,
             sample_interval_seconds=sample_interval_seconds,
+            speed_limit_kmh=speed_limit_kmh,
         )
         with self._lock:
             self._jobs[job_id] = job
@@ -236,7 +246,12 @@ class JobManager:
                         frame_start = time.monotonic()
                         with self._inference_lock:
                             raw_result = self._pipeline.process_frame(frame, frame_index=frame_index)
-                        last_result = apply_consensus(raw_result, tracker, frame_index)
+                        last_result = apply_consensus(
+                            raw_result,
+                            tracker,
+                            frame_index,
+                            timestamp_seconds=timestamp_seconds(frame_index, fps),
+                        )
                         processed_frame_seconds.append(time.monotonic() - frame_start)
                         # Simple moving average over the last 20 processed
                         # frames — recent speed predicts remaining speed
@@ -250,7 +265,11 @@ class JobManager:
                         job.estimated_seconds_remaining = avg_seconds * remaining_processed_frames
 
                     result = last_result
-                    annotated = annotate_frame(frame, result) if result is not None else frame
+                    annotated = (
+                        annotate_frame(frame, result, speed_limit_kmh=job.speed_limit_kmh)
+                        if result is not None
+                        else frame
+                    )
                     writer.write(annotated)
 
                     if result is not None:
@@ -316,6 +335,10 @@ class JobManager:
                                 thumbnail_url=(
                                     f"/api/jobs/{job_id}/thumbnail/"
                                     f"vehicle_{track_thumb_index[track_id]:02d}.jpg"
+                                ),
+                                estimated_speed_kmh=vehicle.estimated_speed_kmh,
+                                speed_limit_exceeded=exceeds_speed_limit(
+                                    vehicle.estimated_speed_kmh, job.speed_limit_kmh
                                 ),
                             )
                             job.vehicle_sightings = _dedupe_sightings(track_sightings)

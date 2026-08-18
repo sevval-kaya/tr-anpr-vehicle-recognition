@@ -1,12 +1,28 @@
-# Türk Plaka + Araç Marka/Model Tanıma Sistemi
+# Türk Plaka Tanıma Sistemi (ANPR) + Araç Tipi Tespiti
 
-Türk trafiğinde araç plakalarını okuyan (yalnızca Türk formatına özel) ve
-aynı görüntüden aracın marka/modelini geniş bir kapsamda (dünya
-genelindeki başlıca üreticiler dahil) tanıyan, üretime hazır bir
-bilgisayarlı görü sistemi.
+Türk trafiğinde araç plakalarını okuyan (yalnızca Türk formatına özel)
+ve aynı görüntüden araç tipini (otomobil/motosiklet/otobüs/kamyon)
+tespit eden bir bilgisayarlı görü sistemi. Fotoğraf, video dosyası ve
+tarayıcıdan canlı kamera girişini destekler.
 
-Kapsam, mimari kararları ve gerekçeleri için bkz. `docs/`. Kaynak proje
-dokümanı bu repoyu başlatan brief'tir.
+Kapsam, mimari kararları ve gerekçeleri için bkz. `docs/`.
+
+## Özellikler
+
+- Araç tespiti (COCO-pretrained YOLO, ek eğitim gerekmez)
+- Plaka bölgesi tespiti (özel eğitilmiş YOLO checkpoint)
+- Plaka OCR (PaddleOCR, Türk plaka karakter setiyle sınırlı)
+- Plaka format doğrulama (il kodu + harf/rakam grubu kuralları)
+- Video/canlı kamerada kareler arası araç takibi + oylama ile daha
+  güvenilir plaka okuma
+- Web arayüzü: fotoğraf yükleme, video yükleme, tarayıcıdan canlı kamera
+
+> **Not:** Araç marka/model tanıma denendi ama yeterli/etiketli veri
+> olmadığından (bkz. `docs/decisions.md` karar #25-#29) rastgele tahmin
+> seviyesini geçemedi ve kapsamdan çıkarıldı; güncel hedef araç tipi +
+> plaka. Alt yapı kodda duruyor (`configs/pipeline.yaml` →
+> `classification.enabled: false`), ileride yeterli veri toplanırsa tek
+> satırlık bir ayarla geri açılabilir.
 
 ## Kurulum
 
@@ -18,8 +34,35 @@ pip install -e ".[dev]"      # temel + test araçları
 # İhtiyaca göre ağır bağımlılık grupları:
 pip install -e ".[detection]"       # ultralytics
 pip install -e ".[ocr]"             # paddleocr
-pip install -e ".[classification]"  # torch, timm
+pip install -e ".[classification]"  # torch, timm (devre dışı özellik için altyapı)
+pip install -e ".[serving]"         # web arayüzü (fastapi, uvicorn)
 ```
+
+## Kullanım
+
+```bash
+# Tek fotoğraf (isteğe bağlı --annotate ile kutulu çıktı outputs/'a yazılır)
+python scripts/run_inference.py path/to/image.jpg --annotate
+
+# Video dosyası
+python scripts/run_inference_video.py path/to/clip.mp4 --output outputs/annotated.mp4
+
+# Canlı kamera
+python scripts/run_inference_video.py 0
+
+# Web arayüzü (fotoğraf/video yükleme + tarayıcıdan canlı kamera)
+python scripts/run_web.py
+```
+
+### Ortam değişkenleri (opsiyonel, sadece veri hazırlama script'leri için)
+
+Çıkarım/pipeline'ın kendisi herhangi bir API anahtarı gerektirmez.
+Sadece veri indirme/etiketleme araçları için gerekir:
+
+| Değişken | Kullanıldığı yer |
+|---|---|
+| `ROBOFLOW_API_KEY` | `scripts/download_datasets.py` (Roboflow veri seti indirme) |
+| `ANTHROPIC_API_KEY` | `scripts/label_plates_with_claude.py` (Claude vision ile yarı otomatik plaka etiketleme, `pip install -e ".[labeling]"` gerekir) |
 
 ## Test
 
@@ -37,14 +80,16 @@ altında ayrı tutulacak.
 src/plaka/
   detection/       araç + plaka tespiti (YOLO sarmalayıcıları)
   ocr/              plaka OCR + ön işleme
-  classification/   marka/model sınıflandırma (timm sarmalayıcısı)
+  classification/   marka/model sınıflandırma (devre dışı, bkz. yukarıdaki not)
   validation/       Türk plaka format doğrulayıcı (model gerektirmez)
-  pipeline/         şemalar, protokoller, tek-kare orkestrasyon
+  pipeline/         şemalar, protokoller, tek-kare orkestrasyon, video/kamera
+                     için kareler arası takip, görselleştirme
+  web/              FastAPI web arayüzü (foto/video/canlı kamera)
   data/             veri seti düzeni yardımcıları
   evaluation/       metrikler: CER, tam eşleşme, top-k doğruluk
   utils/            logging
 configs/            aşama başına YAML config (ağırlık yolları, eşikler, hiperparametreler)
-scripts/            CLI giriş noktaları (veri indirme, eğitim, çıkarım)
+scripts/            CLI giriş noktaları (veri indirme, eğitim, çıkarım, web sunucusu)
 tests/unit/         her src modülü için, harici bağımlılık gerektirmeyen testler
 tests/integration/  gerçek ağırlık/veri gerektiren testler için (şimdilik boş)
 data/               raw/ external/ processed/ — git'e dahil değil, bkz. data/README.md
@@ -57,5 +102,6 @@ Yol haritası ve ilerleme durumu: `docs/roadmap.md`
 
 ## Durum
 
-Aşama 1 (Hazırlık) tamamlandı. Aşama 2'nin (Baseline) kod tarafı hazır;
-veri indirme ve ilk eğitim, büyük kararlarda kullanıcı onayı bekliyor.
+Plaka tespiti + OCR + araç tipi tespiti uçtan uca çalışıyor (foto, video,
+web arayüzü dahil). Devam eden çalışma: plaka dedektörünün açılı/uzak
+kameralardaki recall'ünü iyileştirmek — detaylar `docs/roadmap.md`'de.

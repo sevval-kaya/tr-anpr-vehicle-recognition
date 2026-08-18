@@ -4,6 +4,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 from plaka.pipeline.schemas import BoundingBox, FrameResult, PlateReading, VehicleDetection
@@ -485,5 +486,199 @@ def test_camera_websocket_round_trip(tmp_path: Path) -> None:
         ws.send_bytes(_jpeg_bytes())
         payload = ws.receive_json()
         assert payload["vehicles"][0]["plate_text"] == "34 AB 123"
+        assert payload["vehicles"][0]["estimated_speed_kmh"] is None  # only one observation so far
+        assert payload["vehicles"][0]["speed_limit_exceeded"] is False
         annotated = ws.receive_bytes()
         assert len(annotated) > 0
+
+
+@dataclass
+class _MovingVehiclePipeline:
+    """Same vehicle box every call, but shifted right by `shift_px_per_call`
+    each time — simulates a vehicle crossing the frame at a roughly
+    constant speed, for exercising speed estimation end to end (both the
+    video job path and the camera websocket path use this)."""
+
+    shift_px_per_call: float
+    box_width_px: float = 100.0
+    calls: int = field(default=0, init=False)
+
+    def process_frame(self, frame: np.ndarray, frame_index: int = 0) -> FrameResult:
+        x0 = self.calls * self.shift_px_per_call
+        self.calls += 1
+        box = BoundingBox(x_min=x0, y_min=0, x_max=x0 + self.box_width_px, y_max=50)
+        vehicle = VehicleDetection(
+            box=box, vehicle_type="car", detection_confidence=0.9, plate=None
+        )
+        return FrameResult(frame_index=frame_index, vehicles=[vehicle])
+
+
+def test_infer_video_reports_speed_and_flags_limit_exceeded(tmp_path: Path) -> None:
+    # 10fps -> 0.1s/frame. width=100px -> meters_per_pixel=4.5/100=0.045.
+    # 50px/frame shift -> 0.045*50/0.1*3.6 = 81 km/h, well above the 50
+    # km/h default limit.
+    pipeline = _MovingVehiclePipeline(shift_px_per_call=50.0)
+    app = create_app(pipeline=pipeline, jobs_root=tmp_path / "jobs")
+    client = TestClient(app)
+    video_bytes = _tiny_mp4_bytes(tmp_path, frame_count=5, fps=10.0)
+
+    submit = client.post("/api/infer/video", files={"file": ("clip.mp4", video_bytes, "video/mp4")})
+    job_id = submit.json()["job_id"]
+
+    job = None
+    for _ in range(50):
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["status"] in ("done", "error"):
+            break
+        time.sleep(0.1)
+
+    assert job is not None and job["status"] == "done", job and job.get("error_message")
+    assert job["speed_limit_kmh"] == 50.0
+    sighting = job["vehicle_sightings"][0]
+    assert sighting["estimated_speed_kmh"] is not None
+    assert sighting["estimated_speed_kmh"] == pytest.approx(81.0, rel=0.05)
+    assert sighting["speed_limit_exceeded"] is True
+
+
+def test_infer_video_slow_vehicle_does_not_exceed_limit(tmp_path: Path) -> None:
+    # Same setup but a tiny 2px/frame shift -> ~3.24 km/h, well under 50.
+    pipeline = _MovingVehiclePipeline(shift_px_per_call=2.0)
+    app = create_app(pipeline=pipeline, jobs_root=tmp_path / "jobs")
+    client = TestClient(app)
+    video_bytes = _tiny_mp4_bytes(tmp_path, frame_count=5, fps=10.0)
+
+    submit = client.post("/api/infer/video", files={"file": ("clip.mp4", video_bytes, "video/mp4")})
+    job_id = submit.json()["job_id"]
+
+    job = None
+    for _ in range(50):
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["status"] in ("done", "error"):
+            break
+        time.sleep(0.1)
+
+    assert job is not None and job["status"] == "done", job and job.get("error_message")
+    sighting = job["vehicle_sightings"][0]
+    assert sighting["estimated_speed_kmh"] is not None
+    assert sighting["speed_limit_exceeded"] is False
+
+
+def test_infer_video_custom_speed_limit_kmh(tmp_path: Path) -> None:
+    pipeline = _MovingVehiclePipeline(shift_px_per_call=50.0)  # ~81 km/h
+    app = create_app(pipeline=pipeline, jobs_root=tmp_path / "jobs")
+    client = TestClient(app)
+    video_bytes = _tiny_mp4_bytes(tmp_path, frame_count=5, fps=10.0)
+
+    submit = client.post(
+        "/api/infer/video",
+        files={"file": ("clip.mp4", video_bytes, "video/mp4")},
+        data={"speed_limit_kmh": "120"},  # above the ~81 km/h estimate
+    )
+    job_id = submit.json()["job_id"]
+
+    job = None
+    for _ in range(50):
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["status"] in ("done", "error"):
+            break
+        time.sleep(0.1)
+
+    assert job is not None and job["status"] == "done", job and job.get("error_message")
+    assert job["speed_limit_kmh"] == 120.0
+    assert job["vehicle_sightings"][0]["speed_limit_exceeded"] is False
+
+
+def test_infer_video_rejects_non_positive_speed_limit(tmp_path: Path) -> None:
+    client, _ = _make_client(tmp_path)
+    video_bytes = _tiny_mp4_bytes(tmp_path, frame_count=2)
+    response = client.post(
+        "/api/infer/video",
+        files={"file": ("clip.mp4", video_bytes, "video/mp4")},
+        data={"speed_limit_kmh": "0"},
+    )
+    assert response.status_code == 400
+
+
+# 40px/frame with a 100px-wide box keeps IoU well above the tracker's
+# DEFAULT_MIN_IOU_FOR_MATCH (0.3) between consecutive frames — (100-40)/
+# (100+40) ≈ 0.43 — so the two frames are matched into the same track and
+# a speed can actually be estimated; the point of these tests is speed
+# estimation itself, not stress-testing the tracker's matching threshold.
+_CAMERA_SHIFT_PX_PER_CALL = 40.0
+
+
+def test_camera_websocket_estimates_speed_across_two_frames(tmp_path: Path) -> None:
+    pipeline = _MovingVehiclePipeline(shift_px_per_call=_CAMERA_SHIFT_PX_PER_CALL)
+    app = create_app(pipeline=pipeline, jobs_root=tmp_path / "jobs")
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/camera") as ws:
+        ws.send_bytes(_jpeg_bytes())
+        first = ws.receive_json()
+        ws.receive_bytes()
+        assert first["vehicles"][0]["estimated_speed_kmh"] is None  # only 1 observation
+
+        time.sleep(0.05)  # real elapsed time between frames, for a genuine Δt
+        ws.send_bytes(_jpeg_bytes())
+        second = ws.receive_json()
+        ws.receive_bytes()
+        speed = second["vehicles"][0]["estimated_speed_kmh"]
+        assert speed is not None
+        assert 0 < speed < 200  # never an absurd value (see plaka.pipeline.speed)
+
+
+def test_camera_websocket_speed_limit_from_query_param(tmp_path: Path) -> None:
+    pipeline = _MovingVehiclePipeline(shift_px_per_call=_CAMERA_SHIFT_PX_PER_CALL)
+    app = create_app(pipeline=pipeline, jobs_root=tmp_path / "jobs")
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/camera?speed_limit_kmh=1000") as ws:
+        ws.send_bytes(_jpeg_bytes())
+        ws.receive_json()
+        ws.receive_bytes()
+        time.sleep(0.05)
+        ws.send_bytes(_jpeg_bytes())
+        second = ws.receive_json()
+        ws.receive_bytes()
+        # A moving vehicle, but the limit is absurdly high -> never exceeded,
+        # regardless of exactly how much real wall-clock time elapsed.
+        assert second["vehicles"][0]["speed_limit_exceeded"] is False
+
+
+def test_camera_websocket_set_speed_limit_control_message(tmp_path: Path) -> None:
+    pipeline = _MovingVehiclePipeline(shift_px_per_call=_CAMERA_SHIFT_PX_PER_CALL)
+    app = create_app(pipeline=pipeline, jobs_root=tmp_path / "jobs")
+    client = TestClient(app)
+
+    # An absurdly low starting limit (0.1 km/h) so "exceeded" is true for
+    # any real motion at all, regardless of exactly how much wall-clock
+    # time elapsed between the two frames — real test timing can't be
+    # controlled precisely, so the assertions here avoid depending on it.
+    with client.websocket_connect("/ws/camera?speed_limit_kmh=0.1") as ws:
+        ws.send_bytes(_jpeg_bytes())
+        ws.receive_json()
+        ws.receive_bytes()
+        time.sleep(0.05)
+        ws.send_bytes(_jpeg_bytes())
+        before = ws.receive_json()
+        ws.receive_bytes()
+        assert before["vehicles"][0]["speed_limit_exceeded"] is True
+
+        # Raise the limit mid-stream via a control message, no reconnect.
+        ws.send_text('{"type": "set_speed_limit", "value": 1000}')
+        time.sleep(0.05)
+        ws.send_bytes(_jpeg_bytes())
+        after = ws.receive_json()
+        ws.receive_bytes()
+        assert after["vehicles"][0]["speed_limit_exceeded"] is False
+
+
+def test_camera_websocket_malformed_control_message_is_ignored_not_fatal(tmp_path: Path) -> None:
+    client, _ = _make_client(tmp_path)
+    with client.websocket_connect("/ws/camera") as ws:
+        ws.send_text("not valid json")
+        # Connection must still be alive and process frames normally afterward.
+        ws.send_bytes(_jpeg_bytes())
+        payload = ws.receive_json()
+        assert payload["vehicles"][0]["plate_text"] == "34 AB 123"
+        ws.receive_bytes()

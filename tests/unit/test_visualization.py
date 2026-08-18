@@ -87,6 +87,64 @@ def test_vehicle_with_no_plate_or_make_model_still_draws_box() -> None:
     assert not np.array_equal(annotated, frame)
 
 
+def test_speed_is_drawn_below_the_box_when_set() -> None:
+    frame = _frame()
+    vehicle = VehicleDetection(
+        box=BoundingBox(x_min=10, y_min=10, x_max=100, y_max=100),
+        vehicle_type="car",
+        detection_confidence=0.9,
+        plate=None,
+        estimated_speed_kmh=42.0,
+    )
+    result = FrameResult(frame_index=0, vehicles=[vehicle])
+
+    without_speed = annotate_frame(
+        frame,
+        FrameResult(
+            frame_index=0,
+            vehicles=[vehicle.model_copy(update={"estimated_speed_kmh": None})],
+        ),
+    )
+    with_speed = annotate_frame(frame, result)
+
+    assert not np.array_equal(with_speed, without_speed)  # the speed label adds pixels
+
+
+def test_speed_label_is_not_drawn_when_none() -> None:
+    # Photo-mode vehicles always have estimated_speed_kmh=None (no motion
+    # info in a single frame) — must not crash or draw a bogus label.
+    frame = _frame()
+    vehicle = VehicleDetection(
+        box=BoundingBox(x_min=10, y_min=10, x_max=100, y_max=100),
+        vehicle_type="car",
+        detection_confidence=0.9,
+        plate=None,
+        estimated_speed_kmh=None,
+    )
+    result = FrameResult(frame_index=0, vehicles=[vehicle])
+    annotated = annotate_frame(frame, result)
+    assert not np.array_equal(annotated, frame)  # box/type label still drawn
+
+
+def test_speed_over_limit_uses_a_different_color_than_under_limit() -> None:
+    # Same estimated speed (80 km/h) both times — only the configured limit
+    # changes whether it's flagged as exceeded (red + "!" suffix) or not
+    # (plain white label).
+    frame = _frame()
+    vehicle = VehicleDetection(
+        box=BoundingBox(x_min=10, y_min=10, x_max=100, y_max=100),
+        vehicle_type="car",
+        detection_confidence=0.9,
+        plate=None,
+        estimated_speed_kmh=80.0,
+    )
+    result = FrameResult(frame_index=0, vehicles=[vehicle])
+
+    under_limit = annotate_frame(frame, result, speed_limit_kmh=100.0)
+    over_limit = annotate_frame(frame, result, speed_limit_kmh=50.0)
+    assert not np.array_equal(under_limit, over_limit)
+
+
 def test_vehicle_type_is_shown_when_classification_disabled() -> None:
     # Default scope (docs/decisions.md #29): no classifier wired in, so
     # make_model is always None, but the box must still get a type label.

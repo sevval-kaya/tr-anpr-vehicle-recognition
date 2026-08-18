@@ -232,6 +232,26 @@ svg.dropzone-icon { width: 38px; height: 38px; color: var(--red); margin-bottom:
 .badge-valid { color: var(--green); font-weight: 600; }
 .badge-invalid { color: var(--orange); font-weight: 600; }
 
+/* Uncalibrated speed estimate (docs/decisions.md #42) — neutral by default,
+   red only once it's flagged as over the configured limit, so a normal
+   reading never competes visually with an actually-exceeding one. */
+.speed-pill {
+  display: inline-block; font-family: "JetBrains Mono", "Consolas", monospace; font-weight: 700;
+  font-size: 0.82rem; background: var(--bg-subtle); border: 1px solid var(--border-strong);
+  border-radius: 6px; padding: 2px 8px; color: var(--ink-soft);
+}
+.speed-pill.exceeded { background: var(--red-light); color: var(--red-dark); border-color: #f3c7c4; }
+.speed-relative-tag {
+  font-size: 0.7rem; color: var(--ink-softer); text-transform: uppercase;
+  letter-spacing: 0.03em; font-weight: 600; margin-left: 5px;
+}
+.limit-exceeded-badge {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 0.72rem; font-weight: 800;
+  color: white; background: var(--red); border-radius: 6px; padding: 3px 8px;
+  letter-spacing: 0.03em; width: fit-content;
+}
+.results-table tr.exceeded td { background: var(--red-light); }
+
 .progress-row { display: flex; align-items: center; gap: 12px; }
 .progress-bar-track { flex: 1; height: 10px; background: var(--border); border-radius: 6px; overflow: hidden; }
 .progress-bar-fill {
@@ -257,10 +277,11 @@ svg.dropzone-icon { width: 38px; height: 38px; color: var(--red); margin-bottom:
 
 .video-options { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 18px; }
 .option-field { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: var(--ink-soft); font-weight: 600; }
-.option-field select {
+.option-field select, .option-field input[type="number"] {
   padding: 9px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
   background: var(--card); color: var(--ink); font-family: inherit; font-size: 0.9rem; min-width: 260px;
 }
+.option-field input[type="number"] { min-width: 110px; }
 .option-hint { display: flex; align-items: flex-start; gap: 5px; font-size: 0.78rem; color: var(--ink-soft); font-weight: 400; max-width: 320px; }
 .option-hint.warning { color: var(--orange); font-weight: 600; }
 .option-hint .lucide { flex-shrink: 0; margin-top: 0.15em; }
@@ -300,6 +321,7 @@ svg.dropzone-icon { width: 38px; height: 38px; color: var(--red); margin-bottom:
   transition: transform 0.15s, box-shadow 0.15s;
 }
 .plate-gallery-item:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.plate-gallery-item.exceeded { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
 .plate-gallery-item img { width: 100%; display: block; }
 .plate-gallery-caption { padding: 10px; font-size: 0.85rem; display: flex; flex-direction: column; gap: 5px; }
 .plate-gallery-plate-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -314,6 +336,9 @@ svg.dropzone-icon { width: 38px; height: 38px; color: var(--red); margin-bottom:
 
 .camera-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .camera-controls .btn { margin-top: 0; }
+.camera-speed-field { gap: 4px; }
+.camera-speed-field input[type="number"] { min-width: 90px; }
+.camera-card > .option-hint { margin-top: 12px; max-width: 100%; }
 
 .camera-view {
   position: relative;

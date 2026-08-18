@@ -1699,3 +1699,107 @@ doğrulandı: sadece seçili thumb'da `display:block`.
 kartları (durum ikonlu), kamera canlı görünümü dahil hiçbir mevcut
 işlev bozulmadı. `pytest tests/unit` 208 test, hepsi geçiyor (bu
 değişiklikler frontend-only olduğu için beklenen sonuç).
+
+## 42. Kalibrasyonsuz, kendi-kutu-referanslı hız tahmini + hız sınırı karşılaştırması (video + canlı kamera)
+
+**Karar:** Kullanıcı gerçek bir kalibrasyon süreci (bilinen referans
+mesafe ölçümü, sabit kamera açısı/yüksekliği kaydı, homografi vb.)
+istemedi — bunun yerine "kesin değil ama kabaca bir fikir veren" bir hız
+göstergesi istendi, belirsizliğin arayüzde açıkça işaretlenmesi şartıyla.
+Bu, mevcut projenin genel yaklaşımıyla tutarlı: kalibrasyon gerektirmeyen
+her aşama (COCO-pretrained araç dedektörü, kontrast-only ön işleme)
+"mükemmel olmayan ama veri toplamadan bugün çalışan" seçeneği tercih etti.
+
+**Yöntem — neden tek bir global piksel↔metre sabiti değil:** Kameraya
+yakın/uzak araçlar farklı ölçekte göründüğü için (perspektif), sabit bir
+"1 piksel = X metre" varsayımı yakın plana göre kalibre edilirse uzaktaki
+aracı, uzağa göre kalibre edilirse yakındaki aracı sistematik olarak
+yanlış tahmin eder. Bunun yerine her aracın **kendi tespit kutusunun
+genişliği**, o karedeki mesafesi için piksel↔metre ölçeği olarak
+kullanılıyor (`plaka.pipeline.speed.ASSUMED_VEHICLE_LENGTH_M` — araç
+tipine göre kabaca kabul edilmiş ortalama gerçek uzunluk: car≈4.5m,
+motorcycle≈2m, bus≈12m, truck≈8m; bunlar ölçülmedi, genel bilinen kaba
+referans değerler). Bu, perspektif hatasını *azaltır* ama *ortadan
+kaldırmaz* — hâlâ tek bir global sabitten daha az kötü bir yaklaşım.
+
+**Hesaplama (`plaka.pipeline.tracker.VehicleTrack` + `plaka.pipeline.speed`):**
+Tracker artık her track için, her karede kutunun alt-orta noktasını
+(yaklaşık yere değme noktası) + kutu genişliğini + o karenin gerçek zaman
+damgasını `position_history`'de biriktiriyor (`VehicleTracker.update()`
+artık bir `timestamp_seconds` parametresi alıyor). Ardışık iki gözlem
+arasında: `metre_per_piksel = varsayılan_uzunluk_m / iki_gözlemin_ortalama_kutu_genişliği`,
+piksel yer değiştirmesi bu oranla metreye çevrilip gerçek `Δt`'ye
+bölünüyor. Son ~10 gözlem çiftinin ortalaması alınıyor (ham kare-arası
+hız, tracker/detector jitter'ı yüzünden çok gürültülü — tek bir sıçrama
+tüm tahmini bozabilir); 0-200 km/h aralığı dışına çıkan tekil çift-hız
+değerleri (kutu sıçraması/jitter belirtisi) ortalamaya hiç dahil
+edilmiyor, sonucu bozmasınlar diye.
+
+**Zaman tabanı — video vs. canlı kamera ayrı ele alındı:** Video dosyası
+için `frame_index / fps` kullanılıyor (sabit, güvenilir — `jobs.py`).
+Canlı kamera için bu güvenilir değil: tarayıcı `sendNextCameraFrame`
+tur-başı (round-trip) mantığıyla kare gönderiyor, aralıklar model
+işleme süresine göre değişken — bu yüzden her işlenen karenin gerçek
+`time.monotonic()` duvar-saati zaman damgası kullanılıyor
+(`src/plaka/web/app.py`, `_infer_and_annotate`). Ayrıca canlı kamera
+akışı artık kendi `VehicleTracker` örneğine sahip (öncesinde `/ws/camera`
+tracker'ı HİÇ kullanmıyordu — track_id/konsensüs/hız hiçbiri canlı modda
+yoktu; bu değişiklikle eklendi) — bağlantı başına bir tracker, oturumlar
+arası paylaşılmıyor.
+
+**Hız sınırı karşılaştırması:** `configs/pipeline.yaml`'a
+`speed.default_speed_limit_kmh: 50.0` eklendi (sadece arayüzün
+önceden-doldurduğu değer — hem video yüklemede hem kamera bağlantısında
+kullanıcı tarafından her seferinde değiştirilebilir, sunucu tarafında
+zorlanmıyor). Video modunda form alanı olarak, kamera modunda WebSocket
+URL'sindeki `?speed_limit_kmh=` sorgu parametresi (bağlantı anı) +
+akış sırasında `{"type": "set_speed_limit", "value": N}` JSON kontrol
+mesajı (bağlantıyı koparmadan değiştirme) olarak iletiliyor. Sınırı aşan
+araçlar `speed_limit_exceeded: true` ile işaretleniyor (galeri kartı,
+video tablosu, kamera tablosu — hepsinde kırmızı vurgu).
+
+**Arayüzde belirsizlik gizlenmedi:** `~XX km/h` formatı (kesinlik iddiası
+yok), yanında bilgi ikonu/tooltip ("Kalibrasyon yapılmadı, kabaca bir
+tahmindir, gerçek hızdan önemli ölçüde sapabilir."), ek olarak kaba bir
+"yavaş/normal/hızlı" göreli etiketi (`relative_speed_label`, keyfi
+eşikler: <15 yavaş, 15-60 normal, >60 hızlı) — sayısal değerin tek
+başına verdiği yanlış kesinlik hissini dengelemek için. Fotoğraf modunda
+hiç gösterilmiyor (tek kare, hareket bilgisi yok — `estimated_speed_kmh`
+sadece `apply_consensus` çağrılan video/kamera akışlarında set ediliyor).
+
+**Bilinen hata kaynakları (kasıtlı olarak çözülmedi):**
+1. **Kamera açısı/perspektif bozulması** — araç kameraya tam yandan değil
+   açılı geçiyorsa, kutunun piksel genişliği gerçek fiziksel genişlikten
+   sistematik sapar (araç kısalmış/uzamış görünür), bu da piksel↔metre
+   oranını olduğundan büyük/küçük yapar.
+2. **Varsayılan uzunluk ile gerçek araç arasındaki fark** — aynı
+   "car" sınıfı içinde bir Fiat Egea (~4.5m) ile bir SUV (~4.7-4.9m)
+   arasındaki fark doğrudan hız hatasına dönüşür; tek bir sabit tüm
+   modelleri temsil edemez.
+3. **Tracker/detector jitter** — kutunun kare-kare birkaç piksel oynaması
+   (tespit gürültüsü), özellikle uzak/küçük kutularda, gerçek harekete
+   göre orantısız büyük bir hız sıçraması gibi görünebilir (hareketli
+   ortalama + 0-200 km/h filtresiyle kısmen yumuşatıldı, tamamen
+   giderilmedi).
+4. **Yer düzlemi varsayımı** — kutunun alt-orta noktası "aracın yerle
+   temas ettiği nokta" olarak alınıyor; eğim/rampa gibi durumlarda bu
+   varsayım bozulur.
+
+**İleride gerçek kalibrasyon eklenirse:** Bilinen bir referans mesafe
+(örn. yerdeki iki nokta arası gerçek metre + bu noktaların pikseldeki
+karşılığı) veya sabit kamera açısı/yüksekliği + basit bir homografi ile
+piksel↔metre dönüşümü sahneye özel ve araç-tipinden bağımsız hale
+getirilebilir — bu, hata kaynağı #1 ve #2'yi büyük ölçüde ortadan
+kaldırır (kaynak #3 tracker/detector kalitesine bağlı kalır). Bu
+sayfadaki fikir değişirse, referans olarak kalsın diye yazıldı.
+
+**Test:** `tests/unit/test_speed.py` — `estimate_speed_kmh` için: yeterli
+gözlem olmadan `None`, iki gözlemden makul bir km/h değeri, aşırı
+uçların (tek bir sıçrama) ortalamaya dahil edilmeden filtrelendiği,
+0-200 km/h dışı sonuç üretmediği. `tests/unit/test_tracker.py`'ye
+`position_history` birikimi ve `VehicleTrack.estimated_speed_kmh`
+testleri eklendi. `tests/unit/test_web_app.py`'ye: video işinde hız
+alanlarının JSON'da göründüğü, hız sınırını aşan/aşmayan durumların
+doğru işaretlendiği, kamera WebSocket'inde art arda iki karede hızın
+hesaplandığı ve `set_speed_limit` kontrol mesajının çalıştığı testleri
+eklendi.
