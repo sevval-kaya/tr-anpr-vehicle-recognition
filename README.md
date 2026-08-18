@@ -52,10 +52,62 @@ Kapsam, mimari kararları ve gerekçeleri için bkz. `docs/`.
 
 ## Kurulum
 
+Üç yol var: **Docker** (platformdan bağımsız, en az sürtünme),
+**otomatik script** (`setup.sh` / `setup.ps1`), ya da **manuel** adımlar.
+Otomatik script'ler aşağıdaki manuel adımların tamamını (sanal ortam,
+bağımlılıklar, model ağırlığı, test çalıştırma) tek komutta yapar.
+
+### Docker (macOS, Windows, Linux — fark etmez)
+
 ```bash
+docker compose up --build
+```
+
+`http://localhost:8000` adresi hazır olduğunda yanıt verir. Ek kurulum
+gerekmez — model ağırlığı imaj build edilirken otomatik indirilir.
+
+### macOS / Linux
+
+**Otomatik:**
+```bash
+git clone https://github.com/sevval-kaya/tr-anpr-vehicle-recognition.git
+cd tr-anpr-vehicle-recognition
+./setup.sh
+```
+
+**Manuel:**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"             # temel + test araçları
+
+# İhtiyaca göre ağır bağımlılık grupları:
+pip install -e ".[detection]"       # ultralytics
+pip install -e ".[ocr]"             # paddleocr
+pip install -e ".[classification]"  # torch, timm (devre dışı özellik için altyapı)
+pip install -e ".[serving]"         # web arayüzü (fastapi, uvicorn)
+
+# Plaka dedektörü checkpoint'i (models/plate_detector/best.pt) git'e
+# dahil değil — GitHub Release'den indir (bkz. docs/decisions.md #44):
+python scripts/download_weights.py
+```
+
+### Windows (PowerShell)
+
+**Otomatik:**
+```powershell
+git clone https://github.com/sevval-kaya/tr-anpr-vehicle-recognition.git
+cd tr-anpr-vehicle-recognition
+.\setup.ps1
+```
+> Script çalıştırma politikası engellerse (yönetici gerekmez):
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+
+**Manuel:**
+```powershell
 python -m venv .venv
-.venv\Scripts\activate       # Windows
-pip install -e ".[dev]"      # temel + test araçları
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"             # temel + test araçları
 
 # İhtiyaca göre ağır bağımlılık grupları:
 pip install -e ".[detection]"       # ultralytics
@@ -70,7 +122,14 @@ python scripts/download_weights.py
 
 ## Kullanım
 
+Sanal ortam aktifken (`source .venv/bin/activate` / `.venv\Scripts\Activate.ps1`)
+komutların kendisi macOS/Linux ve Windows'ta birebir aynıdır.
+
+### macOS / Linux
+
 ```bash
+source .venv/bin/activate
+
 # Tek fotoğraf (isteğe bağlı --annotate ile kutulu çıktı outputs/'a yazılır)
 python scripts/run_inference.py path/to/image.jpg --annotate
 
@@ -83,6 +142,26 @@ python scripts/run_inference_video.py 0
 # Web arayüzü (fotoğraf/video yükleme + tarayıcıdan canlı kamera)
 python scripts/run_web.py
 ```
+
+### Windows (PowerShell)
+
+```powershell
+.venv\Scripts\Activate.ps1
+
+# Tek fotoğraf (isteğe bağlı --annotate ile kutulu çıktı outputs/'a yazılır)
+python scripts/run_inference.py path/to/image.jpg --annotate
+
+# Video dosyası
+python scripts/run_inference_video.py path/to/clip.mp4 --output outputs/annotated.mp4
+
+# Canlı kamera
+python scripts/run_inference_video.py 0
+
+# Web arayüzü (fotoğraf/video yükleme + tarayıcıdan canlı kamera)
+python scripts/run_web.py
+```
+
+Web arayüzü açıldığında `http://127.0.0.1:8000` adresinden erişilebilir.
 
 ### Ortam değişkenleri (opsiyonel, sadece veri hazırlama script'leri için)
 
