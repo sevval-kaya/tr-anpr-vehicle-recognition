@@ -1803,3 +1803,94 @@ alanlarının JSON'da göründüğü, hız sınırını aşan/aşmayan durumlar�
 doğru işaretlendiği, kamera WebSocket'inde art arda iki karede hızın
 hesaplandığı ve `set_speed_limit` kontrol mesajının çalıştığı testleri
 eklendi.
+
+## 43. Hız tahmininin doğruluğunu ölçmek için fiziksel referans protokolü + `scripts/eval_speed_estimation.py`
+
+**Sorun:** Karar #42'deki hız tahmini kalibrasyonsuz — bunu bilinçli
+olarak kabul ettik, ama "ne kadar yanlış" sorusuna staj raporu için
+gerçek bir sayı (MAE/MAPE) gerekiyordu. Tek bir örnek video üzerinde
+"makul görünüyor" demek yeterli değil; gerçek referans hıza ihtiyaç var.
+
+**Fiziksel protokol — GPS/hız göstergesi değil, ölçülü mesafe + kronometre:**
+Kullanıcının kaynakları (araç/sürücü lojistiği kısıtlı, staj süresi
+sınırlı) göz önüne alınarak en ucuz-ama-gerçekçi yöntem seçildi: bant
+metreyle ölçülmüş iki nokta arası bilinen bir mesafe + kronometre.
+Gerçek hız = mesafe / süre, ekstra donanım (GPS uygulaması, radar)
+gerekmez. **Önemli kısıt:** test öznesi gerçek bir araç (otomobil veya
+motosiklet) olmalı — `VehicleDetector` sadece COCO'nun car/motorcycle/
+bus/truck sınıflarını tanıyor (`configs/detection.yaml`), yaya veya
+bisiklet pipeline tarafından hiç tespit edilmiyor, dolayısıyla yürüyerek/
+bisikletle test bu sistemle çalışmaz.
+
+**`scripts/eval_speed_estimation.py`:** Bir manifest CSV'sinden
+(`video_path,distance_m,duration_seconds,rotate_degrees,notes`) her
+klip için gerçek InferencePipeline + `VehicleTracker` + `plaka.pipeline.
+speed`'i (production'daki aynı kod yolu, ayrı bir "test modeli" değil)
+çalıştırıp, en çok kare boyunca takip edilen track'i ("baskın" track —
+klipte tek gerçek test öznesi olduğu varsayımıyla) o klibin gerçek
+hızıyla karşılaştırıyor. Rapor: klip-bazlı tahmin/gerçek/hata tablosu +
+toplam MAE (ortalama mutlak hata) ve MAPE (ortalama yüzde hata) +
+sonuçları bir CSV'ye yazma (rapora yapıştırmak için).
+
+**"Baskın track" seçimi neden `observation_count` değil `position_history`
+uzunluğu:** `VehicleTrack.observation_count`, sadece *geçerli formatlı
+plaka okumalarının* sayısıdır — hız testi klipleri plaka okunabilirliği
+için değil, hareket için çekildiğinden (araç açılı/uzak geçebilir), bu
+neredeyse hep 0 olurdu. `len(track.position_history)` (kaç karede
+takip edildiği) gerçek sinyal.
+
+**Başka araç uyarısı:** Bir klipte, baskın track dışında en az 5 kare
+boyunca görünen başka bir track varsa (`other_tracks > 0`), kullanıcı
+uyarılıyor — "baskın" track her zaman gerçek test aracı olmayabilir
+(örn. arka planda geçen başka bir araç daha uzun takip edildiyse).
+
+**Test:** `tests/unit/test_eval_speed_estimation.py` — gerçek ground-
+truth formülü, `ClipResult` hata hesaplamaları, sahte (model gerektirmeyen)
+pipeline ile uçtan uca `evaluate()` akışı, eksik klip dosyasının
+durdurmadan atlanması, kısa ömürlü bir "decoy" aracın baskın track
+seçimini bozmaması ama uzun süreli bir ikinci aracın işaretlenmesi.
+
+## 44. Taşınabilirlik çalışması (`feat/portability`) — model ağırlığı GitHub Release'e taşınacak, ama release oluşturma lisans netleşene kadar ertelendi
+
+**Bağlam:** Repoyu başka makinelerde kolayca çalıştırılabilir hale
+getirme çalışması (`feat/portability` branch'i — Docker, tek-komut
+kurulum script'leri, bağımlılık kilitleme, CI). İlk adım
+`models/plate_detector/best.pt`'ı (şu an sadece kullanıcının yerel
+makinesinde, git'e hiç girmemiş) bir GitHub Release asset'i olarak
+yayınlamaktı.
+
+**Durduruldu — lisans netleşmeden yayınlanmadı:** Bu checkpoint karar
+#16/#18'e göre yaklaşık yarı yarıya iki kaynaktan eğitildi: ~875 görüntü
+Roboflow'dan (CC BY 4.0 — atıf gerektirir, sorun değil) ve ~875 görüntü
+`data/external/user_plates/`'ten — bu verinin kaynağı/lisansı henüz
+belirtilmemiş (`data/README.md`'de zaten not edilmişti). Checkpoint'in
+kendisi bu ikinci kaynaktan öğrenilmiş sinyali de taşıyor; bir GitHub
+Release **public** bir dağıtım olduğundan, bu "harici paylaşım" sayılır.
+Kullanıcıya hatırlatıldı, netleşene kadar release'in **oluşturulmaması**
+onaylandı — henüz hiçbir release/tag yok.
+
+**Ayrıca `gh` CLI bu makinede hiç kurulu değil** (sadece authenticate
+değil) — release adımı bu yüzden de bekliyor.
+
+**Şimdilik yapılan (release'e bağımlı olmayan kısım):**
+`scripts/download_weights.py` yazıldı — `_release_asset_url`/`--repo`/
+`--tag`/`--asset-name` parametrik, idempotent (dosya zaten varsa
+atlıyor), `.part` geçici dosyaya indirip sonra yeniden adlandırıyor
+(yarıda kesilen indirme asla bozuk bir checkpoint bırakmasın diye),
+hata mesajları anlaşılır (`urllib.error.HTTPError`/`URLError` ayrı ayrı
+yakalanıyor). Gerçek HTTP çağrısı yapmadan test edilebilmesi için
+(`plaka.web.app.create_app(pipeline=...)` ile aynı desen) opsiyonel bir
+`_download_fn` enjekte edilebiliyor — bu proje mock/patch yerine hafif
+sahte (fake) nesneler tercih ediyor, bu da o kalıba uyuyor.
+README'nin Kurulum bölümüne çağırma adımı eklendi.
+
+**Sonraki adım:** Kullanıcı lisans durumunu netleştirip onay verince
+`git tag v0.1.0` + `gh release create` çalıştırılıp
+`scripts/download_weights.py`'nin varsayılan `--repo`/`--tag` değerleri
+gerçek release'e karşı uçtan uca doğrulanacak (şu an bu doğrulama
+yapılamıyor, çünkü hedeflenen release henüz yok).
+
+**Test:** `tests/unit/test_download_weights.py` — URL oluşturma, dosya
+zaten varsa indirmeyi atlama, `--force` ile yine de indirme, eksik
+üst klasörü oluşturma, `HTTPError`/`URLError` durumlarında anlaşılır
+`SystemExit` (ve yarım dosya bırakmama).
