@@ -1894,3 +1894,99 @@ yapılamıyor, çünkü hedeflenen release henüz yok).
 zaten varsa indirmeyi atlama, `--force` ile yine de indirme, eksik
 üst klasörü oluşturma, `HTTPError`/`URLError` durumlarında anlaşılır
 `SystemExit` (ve yarım dosya bırakmama).
+
+## 45. Taşınabilirlik — Docker, tek-komut kurulum, bağımlılık kilitleme, CI (Aşama 2-5)
+
+**Docker (Aşama 2):** Kökte `Dockerfile` (multi-stage: `builder` ağır
+pip kurulumunu izole bir venv'e yapıyor, `runtime` sadece o venv'i +
+kaynak kodu + `libgl1`/`libglib2.0-0`'ı kopyalıyor — build-essential gibi
+derleme araçları final imaja hiç girmiyor), `docker-compose.yml`
+(8000:8000, `outputs/` host'a bağlı, `python scripts/run_web.py --host
+0.0.0.0`), `.dockerignore` (`.venv/`, `data/`, `outputs/`, `.git/` vb.
+hariç — **`models/` de bilinçli olarak hariç**: yerel makinede zaten
+duran checkpoint'in `COPY . .` ile sessizce imaja girip
+`download_weights.py` adımını anlamsızlaştırmasını önlemek için).
+
+**Doğrulama — kısmi:** `docker build --target builder` (sadece ağır
+pip kurulumunu içeren aşama) başarıyla tamamlandı — torch, ultralytics,
+paddleocr, paddlepaddle, fastapi dahil her şey kuruldu (~37 dakika, bu
+makinenin yavaş ağı yüzünden; GitHub Actions runner'ında çok daha hızlı
+olması beklenir). **Tam `docker compose build`/`up` doğrulanamadı** —
+`runtime` aşamasındaki `RUN python scripts/download_weights.py` adımı,
+karar #44'teki bekleyen release olmadan kaçınılmaz olarak 404 ile
+başarısız olur. Release oluşturulunca bu doğrulama tamamlanmalı.
+
+**Tek-komut kurulum (Aşama 3):** `setup.sh` (bash, macOS/Linux) ve
+`setup.ps1` (PowerShell, Windows) — ikisi de Python sürüm kontrolü,
+`.venv` oluşturma/yeniden kullanma, `pip install -e ".[dev,detection,ocr,
+serving]"`, `scripts/download_weights.py`, `pytest` sırasını izliyor.
+`setup.sh` çalıştırılabilir yapıldı (`chmod +x`). Execution policy
+uyarısı script içine yorum olarak **ve** README'nin Hızlı Başlangıç
+bölümüne net bir komut olarak eklendi (script'in kendisi
+`Set-ExecutionPolicy` ile kullanıcının güvenlik ayarını sessizce
+değiştirmiyor — bu, kullanıcının kendi kararı olmalı).
+
+**Bulunan gerçek bug — `setup.ps1`:** İlk taslakta `$ErrorActionPreference
+= "Stop"` yeterli sanıldı, ama bu sadece PowerShell'in kendi (cmdlet)
+hatalarını yakalıyor — `python`/`pip` gibi native komutların sıfır-olmayan
+çıkış koduyla başarısız olması PowerShell hatası **değil**, script bunu
+fark etmeden bir sonraki satıra geçiyordu (örn. ağırlık indirme
+başarısız olsa bile sessizce `pytest`e geçilirdi). `Invoke-Checked`
+yardımcı fonksiyonu eklenip her native çağrıdan sonra `$LASTEXITCODE`
+açıkça kontrol edildi. `setup.sh` bu sorunu zaten yaşamıyordu
+(`set -euo pipefail` native komut hatalarını da yakalıyor).
+
+**Gerçek doğrulama:** `setup.ps1` bu makinede **gerçekten çalıştırıldı**
+(sentaks kontrolü değil) — `.venv` zaten vardı, bağımlılıklar zaten
+kuruluydu, ağırlık zaten diskte olduğu için indirme adımı idempotent
+olarak atlandı, 226/226 test geçti, "Kurulum tamam" mesajı doğru
+basıldı. `setup.sh` bu Windows makinesinde POSIX `bin/activate`
+yolu olmadığı için tam çalıştırılamadı, sadece `bash -n` ile sentaks
+doğrulandı (mantığı `setup.ps1` ile birebir aynı, `$LASTEXITCODE`
+sorununun bash karşılığı zaten `set -e` ile baştan çözülüyor).
+
+**Bağımlılık kilitleme (Aşama 4):** `pip-tools` ile
+`requirements-lock.txt` üretildi (342 satır, `dev`+`detection`+`ocr`+
+`serving` hepsi). `CONTRIBUTING.md` yeniden üretme komutunu **ve** bir
+uyarı notunu içeriyor: bu dosya Windows + Python 3.13'te üretildi
+(projenin gerektirdiği minimum 3.11 değil), bazı pinler platforma özel
+olabilir.
+
+**CI (Aşama 5) — kapsam kullanıcıya soruldu, "sadece dev" gerçekten
+çalışmıyordu:** İlk taslak `pip install -e ".[dev]"` idi (kullanıcının
+"heavy grupları CI'da koşturma, istersen söyle" notuyla). Doğrulama
+sırasında bunun **gerçekten kırık** olduğu bulundu, varsayımsal değil:
+1. `pytest`, `test_web_app.py`'yi `fastapi` eksik olduğu için hiç
+   toplayamıyor — tek bir import hatası **tüm test suite'ini** durduruyor
+   (`Interrupted: 1 error during collection`, 0 test çalışıyor).
+2. `mypy src`, taze bir ortamda serbestçe çözümlenen en yeni numpy
+   sürümünün (2.5.x) stub dosyalarında Python 3.12+ gerektiren `type`
+   sözdizimi kullanması yüzünden çöküyor (proje `python_version = "3.11"`
+   hedefliyor) — **ayrıca** bu daraltılmış ortamda, tam bağımlılık
+   setiyle hiç görülmeyen 6 ekstra mypy bulgusu çıkıyor (muhtemelen
+   detection/ocr paketlerinin taşıdığı tip bilgisinin eksikliğinden).
+
+Kullanıcıya iki yol soruldu: (a) `dev,detection,ocr,serving` hepsini
+kur (yavaş ama güvenilir), (b) `dev`de kal, `httpx2` ekle + numpy'ye üst
+sınır koy + 6 ekstra mypy bulgusunu tek tek düzelt (hızlı ama daha çok
+iş, bazı bulgular yanlış pozitif olabilir). **(a) seçildi.** Doğrulandı:
+`docker build --target builder`'ın **tam bağımlılık setiyle** doğal
+olarak numpy'yi 2.3.5'e (2.5.x değil) sabitlediği görüldü — muhtemelen
+ultralytics/paddlepaddle'ın kendi (dolaylı) numpy üst sınırları
+yüzünden — yani manuel bir numpy pin'i gerekmedi.
+
+**mypy'de kalan 7 hata — CI'nın kendisi kırmızı gösterecek, bilinçli
+bırakıldı:** Tam bağımlılık setiyle bile `mypy src` 7 hata veriyor
+(`tracker.py`:281/333, `video_io.py`:43, `plate_ocr.py`:61/231,
+`web/jobs.py`:218/243). Bunların hepsi bu portability dalından önce de
+var olan, cv2/numpy stub uyumsuzluklarından kaynaklanan **önceden var
+olan** bulgular (git diff ile teyit edildi — hiçbiri bu oturumda
+değiştirilen satırlarda değil). Taşınabilirlik kapsamının dışında
+kaldıkları için burada düzeltilmedi; CI eklendiğinde `mypy` adımı
+kırmızı gösterecek, bu bilinçli/beklenen bir durum — ayrı bir görev
+olarak ele alınmalı.
+
+**Test:** Yukarıdaki gibi — `setup.ps1` gerçekten çalıştırılarak,
+`docker build --target builder` gerçekten build edilerek, CI'nın üç
+komutu (`ruff check .`, `mypy src`, `pytest`) tam bağımlılık setiyle
+gerçekten çalıştırılarak doğrulandı; sentaks-only kontrol değil.
