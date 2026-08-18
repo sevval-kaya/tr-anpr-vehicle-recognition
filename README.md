@@ -138,8 +138,13 @@ kameralardaki recall'ünü iyileştirmek — detaylar `docs/roadmap.md`'de.
 
 ## Lisans
 
-`pyproject.toml` şu an `Proprietary` olarak işaretli. Bu netleştirilmeyi
-bekliyor — hem kod lisansı hem de `models/plate_detector/best.pt`
-checkpoint'inin eğitildiği verilerden birinin (`data/external/user_plates/`,
-bkz. `data/README.md`) kaynağı/lisansı belirsiz olduğu için, harici
-paylaşım/yayın öncesi ayrıca teyit gerekiyor.
+`pyproject.toml` şu an `Proprietary` olarak işaretli — kod lisansı
+kararı hâlâ netleştirilmeyi bekliyor.
+
+`models/plate_detector/best.pt` checkpoint'inin eğitim verisi (Roboflow,
+CC BY 4.0 + `data/external/user_plates/`, kullanıcının internetten
+topladığı görüntüler) yayınlanabilir olarak netleşti — bkz.
+`docs/decisions.md` #46. **Kullanıcının kendi çektiği test video/
+fotoğrafları (`data/external/test_videos/`, `test_foto/`, `speed_eval/`)
+hiçbir zaman yayınlanmıyor** — bunlar zaten git'e hiç girmiyor
+(`.gitignore`), sadece bu sınır burada açıkça not düşülüyor.

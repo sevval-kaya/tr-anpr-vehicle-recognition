@@ -1990,3 +1990,37 @@ olarak ele alınmalı.
 `docker build --target builder` gerçekten build edilerek, CI'nın üç
 komutu (`ruff check .`, `mypy src`, `pytest`) tam bağımlılık setiyle
 gerçekten çalıştırılarak doğrulandı; sentaks-only kontrol değil.
+
+## 46. Karar #44'teki lisans belirsizliği netleşti: `user_plates` internetten toplandı, yayınlanabilir — ama kişisel test video/fotoğrafları asla yayınlanmayacak
+
+**Karar #44'ün güncellemesi:** Kullanıcı netleştirdi —
+`data/external/user_plates/` (plaka dedektörünü eğitmek için kullanılan
+1.955 görüntü) kullanıcının **internetten topladığı** görüntüler,
+kendi çektiği değil. Kullanıcı bu görüntülerle eğitilmiş checkpoint'in
+(`models/plate_detector/best.pt`) GitHub Release'e yayınlanmasını
+**onayladı**. Karar #44'teki blok kaldırıldı — `data/README.md` ve
+`README.md`'nin Lisans bölümü güncellendi.
+
+**Ayrı ve önemli bir sınır — kullanıcının kendi çektiği test medyası
+asla yayınlanmayacak:** Aynı mesajda kullanıcı açıkça belirtti: pipeline'ı
+doğrulamak için kendi çektiği test videoları/fotoğrafları (`arac2.mp4`,
+`arac3.mp4`, `foto.jpeg` — `data/external/test_videos/`, `test_foto/`;
+ayrıca `speed_eval/` altındaki gelecekteki klipler de aynı kategoride)
+**hiçbir zaman** yayınlanmamalı. Kontrol edildi: bunlar zaten
+`data/README.md`'de "kişisel/yerel" olarak işaretliydi, `data/external/*`
+gitignore kapsamında olduğu için hiçbir zaman commit'e girmediler
+(`git log --all --diff-filter=A` ile tüm geçmiş tarandı, tek eşleşme
+bir test dosyasının adıydı, gerçek medya değil) ve planlanan GitHub
+Release tek bir asset (`best.pt`) içeriyor, bu videoları/fotoğrafları
+hiç kapsamıyor — yani teknik olarak risk zaten yoktu. Bu karar, niyeti
+`data/README.md`'de açıkça kayıt altına almak için yazıldı: gelecekte
+release'e ek asset eklenirse veya birisi `data/external/`i başka bir
+amaçla paylaşmayı düşünürse, bu klasörlerin "asla" kategorisinde
+olduğu net olsun.
+
+**Sıradaki adım:** `gh` CLI hâlâ kurulu değil (karar #44'te not edildi).
+Kullanıcı kurup authenticate ettikten sonra `git tag v0.1.0` +
+`gh release create v0.1.0 models/plate_detector/best.pt` çalıştırılabilir
+— bu, gerçek dünyaya görünür bir yayın işlemi olduğu için (git push gibi)
+kullanıcının kendi terminalinden çalıştırması isteniyor, otomatik
+yapılmadı.
