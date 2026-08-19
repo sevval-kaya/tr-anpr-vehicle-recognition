@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import cv2
 import numpy as np
@@ -58,7 +58,10 @@ def _upscale_if_small(
     if height <= 0 or height >= min_height:
         return image
     scale = min_height / height
-    return cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    return cast(
+        NDArray[np.uint8],
+        cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +73,7 @@ class OcrReading:
 def _select_plate_text(
     texts: list[str],
     scores: list[float],
-    boxes: list[tuple[float, float, float, float]],
+    boxes: list[tuple[float, ...]],
 ) -> OcrReading:
     """Pick and merge the detected text region(s) that make up the plate
     number line, out of every region PaddleOCR's detector found in a plate

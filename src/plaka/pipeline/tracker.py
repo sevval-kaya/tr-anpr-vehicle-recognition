@@ -36,7 +36,7 @@ from __future__ import annotations
 from collections import Counter, deque
 from dataclasses import dataclass, field
 
-from plaka.pipeline.schemas import BoundingBox, FrameResult, VehicleDetection
+from plaka.pipeline.schemas import BoundingBox, FrameResult, PlateReading, VehicleDetection
 from plaka.pipeline.speed import BoxPositionObservation, estimate_speed_kmh
 
 # Below this IoU, a detection in the new frame is treated as a different
@@ -278,19 +278,19 @@ class VehicleTracker:
         track_ids = [0] * len(vehicles)
         for cluster_index, cluster in enumerate(clusters):
             rep = vehicles[representative_index[id(cluster)]]
-            track_id = assigned_track_id.get(cluster_index)
-            if track_id is None:
-                track_id = self._next_track_id
+            resolved_track_id = assigned_track_id.get(cluster_index)
+            if resolved_track_id is None:
+                resolved_track_id = self._next_track_id
                 self._next_track_id += 1
-                self._tracks[track_id] = VehicleTrack(
-                    track_id=track_id, last_box=rep.box, last_frame_index=frame_index
+                self._tracks[resolved_track_id] = VehicleTrack(
+                    track_id=resolved_track_id, last_box=rep.box, last_frame_index=frame_index
                 )
             else:
-                track = self._tracks[track_id]
+                track = self._tracks[resolved_track_id]
                 track.last_box = rep.box
                 track.last_frame_index = frame_index
 
-            track = self._tracks[track_id]
+            track = self._tracks[resolved_track_id]
             track.add_position_observation(effective_timestamp, rep.box)
             for vehicle_index in cluster:
                 vehicle = vehicles[vehicle_index]
@@ -298,7 +298,7 @@ class VehicleTracker:
                 plate = vehicle.plate
                 if plate is not None and plate.is_format_valid and plate.normalized_text:
                     track.add_plate_observation(frame_index, plate.normalized_text, plate.ocr_confidence)
-                track_ids[vehicle_index] = track_id
+                track_ids[vehicle_index] = resolved_track_id
 
         return track_ids
 
@@ -328,7 +328,9 @@ def apply_consensus(
         consensus_type = track.consensus_vehicle_type if track is not None else vehicle.vehicle_type
         estimated_speed_kmh = track.estimated_speed_kmh if track is not None else None
         if vehicle.plate is not None and consensus_text is not None:
-            updated_plate = vehicle.plate.model_copy(update={"normalized_text": consensus_text})
+            updated_plate: PlateReading | None = vehicle.plate.model_copy(
+                update={"normalized_text": consensus_text}
+            )
         else:
             updated_plate = vehicle.plate
         updated_vehicles.append(

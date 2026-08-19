@@ -25,9 +25,11 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import cv2
+import numpy as np
+from numpy.typing import NDArray
 
 from plaka.pipeline.inference_pipeline import InferencePipeline
 from plaka.pipeline.schemas import FrameResult
@@ -214,9 +216,8 @@ class JobManager:
             )
 
             output_path = job.output_dir / "annotated.mp4"
-            writer = cv2.VideoWriter(
-                str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
-            )
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]
+            writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
 
             tracker = VehicleTracker()
             track_thumb_index: dict[int, int] = {}
@@ -240,7 +241,7 @@ class JobManager:
                     read_ok, frame = capture.read()
                     if not read_ok:
                         break
-                    frame = plan.prepare(frame)
+                    frame = plan.prepare(cast(NDArray[np.uint8], frame))
 
                     if plan.should_process(frame_index):
                         frame_start = time.monotonic()

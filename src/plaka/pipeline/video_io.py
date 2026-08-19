@@ -16,6 +16,7 @@ option that can't guess wrong.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import cv2
 import numpy as np
@@ -40,7 +41,10 @@ def apply_rotation(frame: NDArray[np.uint8], rotate_degrees: int) -> NDArray[np.
         if rotate_degrees != 0:
             raise ValueError(f"rotate_degrees must be one of {sorted(VALID_ROTATIONS)}, got {rotate_degrees}")
         return frame
-    return cv2.rotate(frame, code)
+    # cv2's stubs type rotate()'s return as a looser ndarray (doesn't
+    # preserve the uint8 dtype through the C++ binding) — cast back to
+    # what it actually returns at runtime.
+    return cast(NDArray[np.uint8], cv2.rotate(frame, code))
 
 
 def rotates_dimensions(rotate_degrees: int) -> bool:
