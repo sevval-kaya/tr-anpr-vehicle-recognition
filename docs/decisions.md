@@ -1803,3 +1803,260 @@ alanlarının JSON'da göründüğü, hız sınırını aşan/aşmayan durumlar�
 doğru işaretlendiği, kamera WebSocket'inde art arda iki karede hızın
 hesaplandığı ve `set_speed_limit` kontrol mesajının çalıştığı testleri
 eklendi.
+
+## 43. Hız tahmininin doğruluğunu ölçmek için fiziksel referans protokolü + `scripts/eval_speed_estimation.py`
+
+**Sorun:** Karar #42'deki hız tahmini kalibrasyonsuz — bunu bilinçli
+olarak kabul ettik, ama "ne kadar yanlış" sorusuna staj raporu için
+gerçek bir sayı (MAE/MAPE) gerekiyordu. Tek bir örnek video üzerinde
+"makul görünüyor" demek yeterli değil; gerçek referans hıza ihtiyaç var.
+
+**Fiziksel protokol — GPS/hız göstergesi değil, ölçülü mesafe + kronometre:**
+Kullanıcının kaynakları (araç/sürücü lojistiği kısıtlı, staj süresi
+sınırlı) göz önüne alınarak en ucuz-ama-gerçekçi yöntem seçildi: bant
+metreyle ölçülmüş iki nokta arası bilinen bir mesafe + kronometre.
+Gerçek hız = mesafe / süre, ekstra donanım (GPS uygulaması, radar)
+gerekmez. **Önemli kısıt:** test öznesi gerçek bir araç (otomobil veya
+motosiklet) olmalı — `VehicleDetector` sadece COCO'nun car/motorcycle/
+bus/truck sınıflarını tanıyor (`configs/detection.yaml`), yaya veya
+bisiklet pipeline tarafından hiç tespit edilmiyor, dolayısıyla yürüyerek/
+bisikletle test bu sistemle çalışmaz.
+
+**`scripts/eval_speed_estimation.py`:** Bir manifest CSV'sinden
+(`video_path,distance_m,duration_seconds,rotate_degrees,notes`) her
+klip için gerçek InferencePipeline + `VehicleTracker` + `plaka.pipeline.
+speed`'i (production'daki aynı kod yolu, ayrı bir "test modeli" değil)
+çalıştırıp, en çok kare boyunca takip edilen track'i ("baskın" track —
+klipte tek gerçek test öznesi olduğu varsayımıyla) o klibin gerçek
+hızıyla karşılaştırıyor. Rapor: klip-bazlı tahmin/gerçek/hata tablosu +
+toplam MAE (ortalama mutlak hata) ve MAPE (ortalama yüzde hata) +
+sonuçları bir CSV'ye yazma (rapora yapıştırmak için).
+
+**"Baskın track" seçimi neden `observation_count` değil `position_history`
+uzunluğu:** `VehicleTrack.observation_count`, sadece *geçerli formatlı
+plaka okumalarının* sayısıdır — hız testi klipleri plaka okunabilirliği
+için değil, hareket için çekildiğinden (araç açılı/uzak geçebilir), bu
+neredeyse hep 0 olurdu. `len(track.position_history)` (kaç karede
+takip edildiği) gerçek sinyal.
+
+**Başka araç uyarısı:** Bir klipte, baskın track dışında en az 5 kare
+boyunca görünen başka bir track varsa (`other_tracks > 0`), kullanıcı
+uyarılıyor — "baskın" track her zaman gerçek test aracı olmayabilir
+(örn. arka planda geçen başka bir araç daha uzun takip edildiyse).
+
+**Test:** `tests/unit/test_eval_speed_estimation.py` — gerçek ground-
+truth formülü, `ClipResult` hata hesaplamaları, sahte (model gerektirmeyen)
+pipeline ile uçtan uca `evaluate()` akışı, eksik klip dosyasının
+durdurmadan atlanması, kısa ömürlü bir "decoy" aracın baskın track
+seçimini bozmaması ama uzun süreli bir ikinci aracın işaretlenmesi.
+
+## 44. Taşınabilirlik çalışması (`feat/portability`) — model ağırlığı GitHub Release'e taşınacak, ama release oluşturma lisans netleşene kadar ertelendi
+
+**Bağlam:** Repoyu başka makinelerde kolayca çalıştırılabilir hale
+getirme çalışması (`feat/portability` branch'i — Docker, tek-komut
+kurulum script'leri, bağımlılık kilitleme, CI). İlk adım
+`models/plate_detector/best.pt`'ı (şu an sadece kullanıcının yerel
+makinesinde, git'e hiç girmemiş) bir GitHub Release asset'i olarak
+yayınlamaktı.
+
+**Durduruldu — lisans netleşmeden yayınlanmadı:** Bu checkpoint karar
+#16/#18'e göre yaklaşık yarı yarıya iki kaynaktan eğitildi: ~875 görüntü
+Roboflow'dan (CC BY 4.0 — atıf gerektirir, sorun değil) ve ~875 görüntü
+`data/external/user_plates/`'ten — bu verinin kaynağı/lisansı henüz
+belirtilmemiş (`data/README.md`'de zaten not edilmişti). Checkpoint'in
+kendisi bu ikinci kaynaktan öğrenilmiş sinyali de taşıyor; bir GitHub
+Release **public** bir dağıtım olduğundan, bu "harici paylaşım" sayılır.
+Kullanıcıya hatırlatıldı, netleşene kadar release'in **oluşturulmaması**
+onaylandı — henüz hiçbir release/tag yok.
+
+**Ayrıca `gh` CLI bu makinede hiç kurulu değil** (sadece authenticate
+değil) — release adımı bu yüzden de bekliyor.
+
+**Şimdilik yapılan (release'e bağımlı olmayan kısım):**
+`scripts/download_weights.py` yazıldı — `_release_asset_url`/`--repo`/
+`--tag`/`--asset-name` parametrik, idempotent (dosya zaten varsa
+atlıyor), `.part` geçici dosyaya indirip sonra yeniden adlandırıyor
+(yarıda kesilen indirme asla bozuk bir checkpoint bırakmasın diye),
+hata mesajları anlaşılır (`urllib.error.HTTPError`/`URLError` ayrı ayrı
+yakalanıyor). Gerçek HTTP çağrısı yapmadan test edilebilmesi için
+(`plaka.web.app.create_app(pipeline=...)` ile aynı desen) opsiyonel bir
+`_download_fn` enjekte edilebiliyor — bu proje mock/patch yerine hafif
+sahte (fake) nesneler tercih ediyor, bu da o kalıba uyuyor.
+README'nin Kurulum bölümüne çağırma adımı eklendi.
+
+**Sonraki adım:** Kullanıcı lisans durumunu netleştirip onay verince
+`git tag v0.1.0` + `gh release create` çalıştırılıp
+`scripts/download_weights.py`'nin varsayılan `--repo`/`--tag` değerleri
+gerçek release'e karşı uçtan uca doğrulanacak (şu an bu doğrulama
+yapılamıyor, çünkü hedeflenen release henüz yok).
+
+**Test:** `tests/unit/test_download_weights.py` — URL oluşturma, dosya
+zaten varsa indirmeyi atlama, `--force` ile yine de indirme, eksik
+üst klasörü oluşturma, `HTTPError`/`URLError` durumlarında anlaşılır
+`SystemExit` (ve yarım dosya bırakmama).
+
+## 45. Taşınabilirlik — Docker, tek-komut kurulum, bağımlılık kilitleme, CI (Aşama 2-5)
+
+**Docker (Aşama 2):** Kökte `Dockerfile` (multi-stage: `builder` ağır
+pip kurulumunu izole bir venv'e yapıyor, `runtime` sadece o venv'i +
+kaynak kodu + `libgl1`/`libglib2.0-0`'ı kopyalıyor — build-essential gibi
+derleme araçları final imaja hiç girmiyor), `docker-compose.yml`
+(8000:8000, `outputs/` host'a bağlı, `python scripts/run_web.py --host
+0.0.0.0`), `.dockerignore` (`.venv/`, `data/`, `outputs/`, `.git/` vb.
+hariç — **`models/` de bilinçli olarak hariç**: yerel makinede zaten
+duran checkpoint'in `COPY . .` ile sessizce imaja girip
+`download_weights.py` adımını anlamsızlaştırmasını önlemek için).
+
+**Doğrulama — kısmi:** `docker build --target builder` (sadece ağır
+pip kurulumunu içeren aşama) başarıyla tamamlandı — torch, ultralytics,
+paddleocr, paddlepaddle, fastapi dahil her şey kuruldu (~37 dakika, bu
+makinenin yavaş ağı yüzünden; GitHub Actions runner'ında çok daha hızlı
+olması beklenir). **Tam `docker compose build`/`up` doğrulanamadı** —
+`runtime` aşamasındaki `RUN python scripts/download_weights.py` adımı,
+karar #44'teki bekleyen release olmadan kaçınılmaz olarak 404 ile
+başarısız olur. Release oluşturulunca bu doğrulama tamamlanmalı.
+
+**Tek-komut kurulum (Aşama 3):** `setup.sh` (bash, macOS/Linux) ve
+`setup.ps1` (PowerShell, Windows) — ikisi de Python sürüm kontrolü,
+`.venv` oluşturma/yeniden kullanma, `pip install -e ".[dev,detection,ocr,
+serving]"`, `scripts/download_weights.py`, `pytest` sırasını izliyor.
+`setup.sh` çalıştırılabilir yapıldı (`chmod +x`). Execution policy
+uyarısı script içine yorum olarak **ve** README'nin Hızlı Başlangıç
+bölümüne net bir komut olarak eklendi (script'in kendisi
+`Set-ExecutionPolicy` ile kullanıcının güvenlik ayarını sessizce
+değiştirmiyor — bu, kullanıcının kendi kararı olmalı).
+
+**Bulunan gerçek bug — `setup.ps1`:** İlk taslakta `$ErrorActionPreference
+= "Stop"` yeterli sanıldı, ama bu sadece PowerShell'in kendi (cmdlet)
+hatalarını yakalıyor — `python`/`pip` gibi native komutların sıfır-olmayan
+çıkış koduyla başarısız olması PowerShell hatası **değil**, script bunu
+fark etmeden bir sonraki satıra geçiyordu (örn. ağırlık indirme
+başarısız olsa bile sessizce `pytest`e geçilirdi). `Invoke-Checked`
+yardımcı fonksiyonu eklenip her native çağrıdan sonra `$LASTEXITCODE`
+açıkça kontrol edildi. `setup.sh` bu sorunu zaten yaşamıyordu
+(`set -euo pipefail` native komut hatalarını da yakalıyor).
+
+**Gerçek doğrulama:** `setup.ps1` bu makinede **gerçekten çalıştırıldı**
+(sentaks kontrolü değil) — `.venv` zaten vardı, bağımlılıklar zaten
+kuruluydu, ağırlık zaten diskte olduğu için indirme adımı idempotent
+olarak atlandı, 226/226 test geçti, "Kurulum tamam" mesajı doğru
+basıldı. `setup.sh` bu Windows makinesinde POSIX `bin/activate`
+yolu olmadığı için tam çalıştırılamadı, sadece `bash -n` ile sentaks
+doğrulandı (mantığı `setup.ps1` ile birebir aynı, `$LASTEXITCODE`
+sorununun bash karşılığı zaten `set -e` ile baştan çözülüyor).
+
+**Bağımlılık kilitleme (Aşama 4):** `pip-tools` ile
+`requirements-lock.txt` üretildi (342 satır, `dev`+`detection`+`ocr`+
+`serving` hepsi). `CONTRIBUTING.md` yeniden üretme komutunu **ve** bir
+uyarı notunu içeriyor: bu dosya Windows + Python 3.13'te üretildi
+(projenin gerektirdiği minimum 3.11 değil), bazı pinler platforma özel
+olabilir.
+
+**CI (Aşama 5) — kapsam kullanıcıya soruldu, "sadece dev" gerçekten
+çalışmıyordu:** İlk taslak `pip install -e ".[dev]"` idi (kullanıcının
+"heavy grupları CI'da koşturma, istersen söyle" notuyla). Doğrulama
+sırasında bunun **gerçekten kırık** olduğu bulundu, varsayımsal değil:
+1. `pytest`, `test_web_app.py`'yi `fastapi` eksik olduğu için hiç
+   toplayamıyor — tek bir import hatası **tüm test suite'ini** durduruyor
+   (`Interrupted: 1 error during collection`, 0 test çalışıyor).
+2. `mypy src`, taze bir ortamda serbestçe çözümlenen en yeni numpy
+   sürümünün (2.5.x) stub dosyalarında Python 3.12+ gerektiren `type`
+   sözdizimi kullanması yüzünden çöküyor (proje `python_version = "3.11"`
+   hedefliyor) — **ayrıca** bu daraltılmış ortamda, tam bağımlılık
+   setiyle hiç görülmeyen 6 ekstra mypy bulgusu çıkıyor (muhtemelen
+   detection/ocr paketlerinin taşıdığı tip bilgisinin eksikliğinden).
+
+Kullanıcıya iki yol soruldu: (a) `dev,detection,ocr,serving` hepsini
+kur (yavaş ama güvenilir), (b) `dev`de kal, `httpx2` ekle + numpy'ye üst
+sınır koy + 6 ekstra mypy bulgusunu tek tek düzelt (hızlı ama daha çok
+iş, bazı bulgular yanlış pozitif olabilir). **(a) seçildi.** Doğrulandı:
+`docker build --target builder`'ın **tam bağımlılık setiyle** doğal
+olarak numpy'yi 2.3.5'e (2.5.x değil) sabitlediği görüldü — muhtemelen
+ultralytics/paddlepaddle'ın kendi (dolaylı) numpy üst sınırları
+yüzünden — yani manuel bir numpy pin'i gerekmedi.
+
+**mypy'de kalan 7 hata — CI'nın kendisi kırmızı gösterecek, bilinçli
+bırakıldı:** Tam bağımlılık setiyle bile `mypy src` 7 hata veriyor
+(`tracker.py`:281/333, `video_io.py`:43, `plate_ocr.py`:61/231,
+`web/jobs.py`:218/243). Bunların hepsi bu portability dalından önce de
+var olan, cv2/numpy stub uyumsuzluklarından kaynaklanan **önceden var
+olan** bulgular (git diff ile teyit edildi — hiçbiri bu oturumda
+değiştirilen satırlarda değil). Taşınabilirlik kapsamının dışında
+kaldıkları için burada düzeltilmedi; CI eklendiğinde `mypy` adımı
+kırmızı gösterecek, bu bilinçli/beklenen bir durum — ayrı bir görev
+olarak ele alınmalı.
+
+**Test:** Yukarıdaki gibi — `setup.ps1` gerçekten çalıştırılarak,
+`docker build --target builder` gerçekten build edilerek, CI'nın üç
+komutu (`ruff check .`, `mypy src`, `pytest`) tam bağımlılık setiyle
+gerçekten çalıştırılarak doğrulandı; sentaks-only kontrol değil.
+
+## 46. Karar #44'teki lisans belirsizliği netleşti: `user_plates` internetten toplandı, yayınlanabilir — ama kişisel test video/fotoğrafları asla yayınlanmayacak
+
+**Karar #44'ün güncellemesi:** Kullanıcı netleştirdi —
+`data/external/user_plates/` (plaka dedektörünü eğitmek için kullanılan
+1.955 görüntü) kullanıcının **internetten topladığı** görüntüler,
+kendi çektiği değil. Kullanıcı bu görüntülerle eğitilmiş checkpoint'in
+(`models/plate_detector/best.pt`) GitHub Release'e yayınlanmasını
+**onayladı**. Karar #44'teki blok kaldırıldı — `data/README.md` ve
+`README.md`'nin Lisans bölümü güncellendi.
+
+**Ayrı ve önemli bir sınır — kullanıcının kendi çektiği test medyası
+asla yayınlanmayacak:** Aynı mesajda kullanıcı açıkça belirtti: pipeline'ı
+doğrulamak için kendi çektiği test videoları/fotoğrafları (`arac2.mp4`,
+`arac3.mp4`, `foto.jpeg` — `data/external/test_videos/`, `test_foto/`;
+ayrıca `speed_eval/` altındaki gelecekteki klipler de aynı kategoride)
+**hiçbir zaman** yayınlanmamalı. Kontrol edildi: bunlar zaten
+`data/README.md`'de "kişisel/yerel" olarak işaretliydi, `data/external/*`
+gitignore kapsamında olduğu için hiçbir zaman commit'e girmediler
+(`git log --all --diff-filter=A` ile tüm geçmiş tarandı, tek eşleşme
+bir test dosyasının adıydı, gerçek medya değil) ve planlanan GitHub
+Release tek bir asset (`best.pt`) içeriyor, bu videoları/fotoğrafları
+hiç kapsamıyor — yani teknik olarak risk zaten yoktu. Bu karar, niyeti
+`data/README.md`'de açıkça kayıt altına almak için yazıldı: gelecekte
+release'e ek asset eklenirse veya birisi `data/external/`i başka bir
+amaçla paylaşmayı düşünürse, bu klasörlerin "asla" kategorisinde
+olduğu net olsun.
+
+**Sıradaki adım:** `gh` CLI hâlâ kurulu değil (karar #44'te not edildi).
+Kullanıcı kurup authenticate ettikten sonra `git tag v0.1.0` +
+`gh release create v0.1.0 models/plate_detector/best.pt` çalıştırılabilir
+— bu, gerçek dünyaya görünür bir yayın işlemi olduğu için (git push gibi)
+kullanıcının kendi terminalinden çalıştırması isteniyor, otomatik
+yapılmadı.
+
+## 47. Release `v0.1.0` gerçekten yayınlandı — Aşama 1 ve 2'nin bekleyen doğrulaması tamamlandı
+
+**Durum:** Kullanıcı `gh` CLI'yi kurup authenticate oldu, `git tag v0.1.0`
++ `gh release create v0.1.0 models/plate_detector/best.pt` komutlarını
+kendi terminalinden çalıştırdı (bir ara `git push origin v0.1.0`
+gerekti — tag yerelde oluşturulmuştu ama uzak repoya push edilmemişti,
+`gh release create` bunu net bir hatayla bildirdi). Release canlı:
+https://github.com/sevval-kaya/tr-anpr-vehicle-recognition/releases/tag/v0.1.0
+
+**`scripts/download_weights.py` gerçek release'e karşı uçtan uca
+doğrulandı** (karar #44'te sadece mock'lanmış testlerle doğrulanmıştı):
+varsayılan `--repo`/`--tag`/`--asset-name` ile gerçek indirme yapıldı,
+ilerleme çubuğu çalıştı, indirilen dosyanın SHA256'sı yereldeki orijinal
+checkpoint'le **birebir eşleşti** (`5a7cdddc...`) — hem `gh release
+view`'ın gösterdiği digest'le hem de doğrudan hesaplanan checksum'la.
+
+**`docker compose build` tam olarak, sonuna kadar tamamlandı** (karar
+#45'te sadece `--target builder` ile kısmi doğrulanmıştı) — bu
+ortamdaki yavaş ağ yüzünden ~65 dakika sürdü (gerçek Dockerfile/ağ
+sorunundan değil), ama sıfır hatayla bitti. Runtime aşamasındaki
+`RUN python scripts/download_weights.py` adımı container **içinden**
+gerçek release'e bağlanıp checkpoint'i 9.6 saniyede indirdi.
+
+**`docker compose up` ile tam uçtan uca doğrulama:** Container ayağa
+kalktı, `pipeline ready` logu göründü (checkpoint gerçekten yüklendi),
+`http://localhost:8000` 200 OK döndü, ve `curl` ile gerçek bir fotoğraf
+(`data/external/test_foto/foto.jpeg`) `/api/infer/image`'a gönderilip
+**doğru sonuç alındı**: 2 araç, ikisi de geçerli Türk plakasıyla
+("23 FE 251", "23 AFS 937") — yani container içindeki checkpoint
+gerçekten çalışıyor, sadece build'in başarılı olması değil. Doğrulama
+sonrası `docker compose down` ile temizlendi.
+
+**Sonuç: Aşama 1 ve 2 artık tamamen ve gerçek dünyada doğrulanmış
+durumda** — mock/kısmi test değil, gerçek release + gerçek Docker
+build + gerçek çıkarım.

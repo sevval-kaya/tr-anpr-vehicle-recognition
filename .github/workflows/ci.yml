@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # All four extras, not just dev (docs/decisions.md #45): dev-only
+      # was tried first and doesn't actually work — pytest can't even
+      # collect tests/unit/test_web_app.py without `serving` (imports
+      # fastapi directly), and mypy under a dev+serving-only install
+      # crashes on newer numpy's stub syntax (needs Python 3.12+ to
+      # parse, this project targets 3.11) plus reports several extra
+      # findings that don't reproduce with the full dependency set —
+      # apparently artifacts of missing type information from
+      # detection/ocr's packages, not real bugs. Installing all four
+      # extras also happens to pin numpy back down to a compatible
+      # version transitively (verified: 2.3.5, not the freely-resolved
+      # 2.5.x that broke mypy) without needing a manual version cap.
+      # Slower (~3GB, several minutes) but avoids environment-dependent
+      # lint/type-check results.
+      - name: Install dependencies
+        run: pip install -e ".[dev,detection,ocr,serving]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Type-check (mypy)
+        run: mypy src
+
+      - name: Test (pytest)
+        run: pytest
